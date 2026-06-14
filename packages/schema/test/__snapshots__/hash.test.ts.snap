@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`canonical part id > is stable across runs (golden) 1`] = `"sha256:28f8b413dde5f772487d158e112b8290d9ea645c70ecfe5be0c709dd6df48304"`;

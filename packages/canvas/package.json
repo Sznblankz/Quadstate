@@ -1,0 +1,22 @@
+{
+  "name": "@logicsim/canvas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@logicsim/document": "workspace:*",
+    "@logicsim/engine": "workspace:*",
+    "@logicsim/schema": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
+}
