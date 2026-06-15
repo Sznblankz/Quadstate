@@ -7,9 +7,10 @@
 
   // Final logo pattern, read row-major:  0 1 / 1 0  (1 = accent, 0 = gray).
   const FINAL = ["0", "1", "1", "0"];
-  // Reactive digit faces — flicker between 0/1 while centered, then settle.
+  // Reactive digit faces — flicker between 0/1 while spinning, then settle.
   let digits = $state(FINAL.map((d) => ({ char: d, on: d === "1" })));
 
+  let spinner = $state<HTMLDivElement>();
   const els: HTMLSpanElement[] = [];
   function setEl(node: HTMLSpanElement, i: number) { els[i] = node; }
 
@@ -26,9 +27,8 @@
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     els.forEach((el, i) => { el.style.transform = `translate(${grid[i].x}px, ${grid[i].y}px)`; });
 
-    if (reduce || els.length < 4) {
-      // Reduced motion: static final logo, brief hold, then hand off — no
-      // flicker, no travel.
+    if (reduce || !spinner || els.length < 4) {
+      // Reduced motion: static final logo, brief hold, then hand off.
       digits = FINAL.map((d) => ({ char: d, on: d === "1" }));
       els.forEach((el) => (el.style.opacity = "1"));
       const t = setTimeout(onDone, 650);
@@ -48,28 +48,33 @@
       ));
     });
 
-    // 2) Flicker — each digit toggles 0/1 a few times, then locks to FINAL[i]
-    //    (staggered lock = a gentle settle, not a strobe). setTimeout-driven so
-    //    it survives frame-callback throttling.
-    const flickStart = 480;
-    const lockBase = 1180;
-    for (let tick = 0; tick < 9; tick++) {
-      after(flickStart + tick * 90, () => {
-        digits = digits.map((d, i) =>
-          flickStart + tick * 90 >= lockBase + i * 70
+    // 2) Spin the whole 2×2 formation a full turn (ends upright).
+    const spinAt = 460, spinDur = 1000;
+    anims.push(spinner.animate(
+      [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }],
+      { duration: spinDur, delay: spinAt, easing: "cubic-bezier(.45,.05,.2,1)", fill: "forwards" },
+    ));
+
+    // 3) Flicker 0/1 continuously while it spins, then settle to FINAL.
+    const lockAt = spinAt + spinDur - 120;
+    for (let tick = 0; tick < 12; tick++) {
+      const t = spinAt + tick * 80;
+      after(t, () => {
+        digits = digits.map((_, i) =>
+          t >= lockAt + i * 60
             ? { char: FINAL[i], on: FINAL[i] === "1" }
             : (Math.random() < 0.5 ? { char: "0", on: false } : { char: "1", on: true }));
       });
     }
-    after(lockBase + 4 * 70, () => { digits = FINAL.map((d) => ({ char: d, on: d === "1" })); });
+    after(lockAt + 4 * 60, () => { digits = FINAL.map((d) => ({ char: d, on: d === "1" })); });
 
-    // 3) Travel — each digit moves INDIVIDUALLY (staggered) from its centre cell
-    //    to the matching cell of the small corner logo. No merge, no spin.
+    // 4) Travel — each digit moves INDIVIDUALLY (staggered) to the matching
+    //    cell of the small corner logo. No merge, no snap-together.
     const scale = 0.25;
     const cx = window.innerWidth / 2;
     const cy = window.innerHeight / 2;
-    const corner = { x: 44, y: 30 }; // ~ Home/editor chrome mark centre
-    const travelAt = 1620;
+    const corner = { x: 44, y: 30 }; // ~ chrome mark centre
+    const travelAt = spinAt + spinDur + 80;
     els.forEach((el, i) => {
       const start = `translate(${grid[i].x}px, ${grid[i].y}px) scale(1)`;
       const ex = corner.x - cx + grid[i].x * scale;
@@ -77,23 +82,25 @@
       const end = `translate(${ex}px, ${ey}px) scale(${scale})`;
       after(travelAt, () => anims.push(el.animate(
         [{ transform: start }, { transform: end }],
-        { duration: 620, delay: i * 55, easing: "cubic-bezier(.5,.06,.16,1)", fill: "forwards" },
+        { duration: 600, delay: i * 55, easing: "cubic-bezier(.5,.06,.16,1)", fill: "forwards" },
       )));
     });
 
-    // 4) Hand off (Home reveals + this overlay fades). Safety timer covers a
+    // 5) Hand off (Home reveals + this overlay fades). Safety timer covers a
     //    backgrounded tab where animations never advance.
-    after(2160, onDone);
-    after(2700, onDone);
+    after(travelAt + 560, onDone);
+    after(travelAt + 1100, onDone);
     return () => { timers.forEach(clearTimeout); anims.forEach((a) => a.cancel()); };
   });
 </script>
 
 <div class="splash" role="img" aria-label="QuadState">
   <div class="logo">
-    {#each digits as d, i}
-      <span class="digit" class:on={d.on} use:setEl={i}>{d.char}</span>
-    {/each}
+    <div class="spinner" bind:this={spinner}>
+      {#each digits as d, i}
+        <span class="digit" class:on={d.on} use:setEl={i}>{d.char}</span>
+      {/each}
+    </div>
   </div>
 </div>
 
@@ -104,6 +111,7 @@
     background: var(--bg);
   }
   .logo { position: relative; width: 0; height: 0; }
+  .spinner { position: absolute; left: 0; top: 0; transform-origin: center; }
   .digit {
     position: absolute; left: 0; top: 0;
     width: 60px; height: 60px; margin: -30px 0 0 -30px;

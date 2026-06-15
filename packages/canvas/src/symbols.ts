@@ -124,9 +124,12 @@ export function portPosition(
 
 /**
  * Hub-routed wire polyline: every port connects to the first port (the hub).
- * Routing is ORTHOGONAL — each hub→port link is an L (horizontal from the hub
- * to the target's x, then vertical to the target). Degenerate legs (already
- * aligned) collapse, so an aligned pair is one straight segment. No diagonals.
+ * Routing is ORTHOGONAL with a Z-shape per hub→port link: horizontal out of
+ * the hub to a vertical "dogleg" placed in the GAP between the two columns,
+ * then horizontal into the target. Keeping the long vertical leg in the gap
+ * (not at either pin's x) keeps wires off the component bodies, and a small
+ * per-wire lane offset on the dogleg de-stacks parallel routes. Aligned pins
+ * collapse to a single straight segment. No diagonals.
  */
 export function wireSegments(
   doc: CircuitDocument,
@@ -141,11 +144,24 @@ export function wireSegments(
   if (pts.length < 2) return [];
   const hub = pts[0];
   const segs: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
-  for (const p of pts.slice(1)) {
-    const ex = p.x, ey = hub.y; // elbow: horizontal first, then vertical
-    if (hub.x !== ex) segs.push({ x0: hub.x, y0: hub.y, x1: ex, y1: ey });
-    if (ey !== p.y) segs.push({ x0: ex, y0: ey, x1: p.x, y1: p.y });
-  }
+  const push = (x0: number, y0: number, x1: number, y1: number): void => {
+    if (x0 !== x1 || y0 !== y1) segs.push({ x0, y0, x1, y1 });
+  };
+  pts.slice(1).forEach((p, i) => {
+    if (hub.x === p.x || hub.y === p.y) {
+      push(hub.x, hub.y, p.x, p.y); // already aligned: one straight leg
+      return;
+    }
+    // Vertical dogleg at a grid-snapped mid-x, nudged into its own lane so
+    // sibling routes don't stack, then clamped to stay inside the gap.
+    const lane = (((wireId * 2 + i) % 5) - 2) * SNAP; // one of 5 lanes
+    const lo = Math.min(hub.x, p.x), hi = Math.max(hub.x, p.x);
+    let midX = Math.round(((hub.x + p.x) / 2 + lane) / SNAP) * SNAP;
+    midX = Math.max(lo + SNAP, Math.min(hi - SNAP, midX));
+    push(hub.x, hub.y, midX, hub.y);  // H out of the hub
+    push(midX, hub.y, midX, p.y);     // V dogleg in the gap
+    push(midX, p.y, p.x, p.y);        // H into the target
+  });
   return segs;
 }
 

@@ -463,10 +463,12 @@ export function renderOverlay(ctx: CanvasRenderingContext2D, s: RenderState): vo
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.beginPath();
-    // Orthogonal L preview (horizontal first, then vertical) so the preview
-    // matches how the committed wire routes.
+    // Orthogonal Z preview (mid-gap dogleg) so it matches how the committed
+    // wire routes; collapses to a straight line when the ends are aligned.
+    const mx = Math.round((w.x0 + w.x1) / 2);
     ctx.moveTo(w.x0, w.y0);
-    ctx.lineTo(w.x1, w.y0);
+    ctx.lineTo(mx, w.y0);
+    ctx.lineTo(mx, w.y1);
     ctx.lineTo(w.x1, w.y1);
     ctx.stroke();
     ctx.setLineDash([]);
