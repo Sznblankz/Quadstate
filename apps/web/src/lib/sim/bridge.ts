@@ -1,5 +1,6 @@
 import { elaborate, PartLibrary, SchemaError, type Elaboration } from "@logicsim/schema";
 import { exportProject, type CircuitDocument, type EntityId } from "@logicsim/document";
+import type { Transition } from "@logicsim/engine";
 import type { WorkerIn, WorkerOut } from "./worker.js";
 
 export interface CompileStatus {
@@ -31,6 +32,13 @@ export class SimBridge {
   ticksPerSecond = 2000;
   onSnapshot?: () => void;
 
+  /** Per-net transition history for subscribed nets, keyed by ENGINE NET INDEX.
+   *  Cleared on every compile() — net indices are not stable across recompiles. */
+  scopeHistory = new Map<number, Transition[]>();
+  /** Fired after each TraceMsg is ingested (same cadence as onSnapshot). */
+  onTrace?: () => void;
+  private subscribedNets = new Set<number>();
+
   private smokeWaiters: Array<(digest: string) => void> = [];
 
   constructor() {
@@ -40,6 +48,14 @@ export class SimBridge {
         this.netValues = e.data.values;
         this.simTime = e.data.time;
         this.onSnapshot?.();
+      } else if (e.data.type === "trace") {
+        if (e.data.reset) this.scopeHistory.clear();
+        for (const d of e.data.deltas) {
+          let arr = this.scopeHistory.get(d.net);
+          if (!arr) { arr = []; this.scopeHistory.set(d.net, arr); }
+          for (const t of d.transitions) arr.push(t);
+        }
+        this.onTrace?.();
       } else if (e.data.type === "smokeResult") {
         const digest = e.data.digest;
         for (const resolve of this.smokeWaiters.splice(0)) resolve(digest);
@@ -67,6 +83,9 @@ export class SimBridge {
     this.inputNodes.clear();
     this.netValues = null;
     this.elab = null;
+    // Clear synchronously so a SnapshotMsg arriving before the worker's reset
+    // TraceMsg can't index fresh net indices into stale history (no wrong-signal flash).
+    this.scopeHistory.clear();
 
     if (doc.components.size === 0) {
       return { ok: false, message: "place parts to begin" };
@@ -152,5 +171,27 @@ export class SimBridge {
   setSpeed(ticksPerSecond: number): void {
     this.ticksPerSecond = ticksPerSecond;
     this.post({ type: "speed", ticksPerSecond });
+  }
+
+  /** Subscribe the worker to record history for these ENGINE NET indices. */
+  scopeSubscribe(nets: number[]): void {
+    const add: number[] = [];
+    for (const n of nets) if (!this.subscribedNets.has(n)) { this.subscribedNets.add(n); add.push(n); }
+    if (add.length) this.post({ type: "scopeSubscribe", nets: add });
+  }
+
+  /** Unsubscribe these net indices and drop their history. */
+  scopeUnsubscribe(nets: number[]): void {
+    const del: number[] = [];
+    for (const n of nets) if (this.subscribedNets.has(n)) { this.subscribedNets.delete(n); del.push(n); }
+    for (const n of del) this.scopeHistory.delete(n);
+    if (del.length) this.post({ type: "scopeUnsubscribe", nets: del });
+  }
+
+  /** Replace the whole subscription with a fresh net-index set after a recompile. */
+  scopeResubscribe(nets: number[]): void {
+    this.scopeHistory.clear();
+    this.subscribedNets = new Set(nets);
+    if (nets.length) this.post({ type: "scopeSubscribe", nets });
   }
 }

@@ -5,7 +5,15 @@
  * per interval — inputs are applied at explicit sim ticks, so pacing can
  * never change outcomes (determinism constraint #3).
  */
-import { Simulator, Z, runDeterminismSmoke, type CompiledNetlist } from "@logicsim/engine";
+import {
+  Simulator,
+  Z,
+  runDeterminismSmoke,
+  ScopeRecorder,
+  advanceAndSample,
+  type CompiledNetlist,
+  type TraceDelta,
+} from "@logicsim/engine";
 
 interface LoadMsg {
   type: "load";
@@ -24,7 +32,13 @@ interface SpeedMsg { type: "speed"; ticksPerSecond: number }
 interface SmokeMsg { type: "smoke" }
 /** Advance a paused simulation by exactly `ticks` integer ticks. */
 interface StepMsg { type: "step"; ticks: number }
-export type WorkerIn = LoadMsg | PokeMsg | RunMsg | SpeedMsg | SmokeMsg | StepMsg;
+/** Start recording per-tick history for these ENGINE NET indices. Idempotent. */
+interface ScopeSubscribeMsg { type: "scopeSubscribe"; nets: number[] }
+/** Stop recording these engine net indices and drop their buffers. */
+interface ScopeUnsubscribeMsg { type: "scopeUnsubscribe"; nets: number[] }
+export type WorkerIn =
+  | LoadMsg | PokeMsg | RunMsg | SpeedMsg | SmokeMsg | StepMsg
+  | ScopeSubscribeMsg | ScopeUnsubscribeMsg;
 
 export interface SnapshotMsg {
   type: "snapshot";
@@ -38,7 +52,17 @@ export interface SmokeResultMsg {
   digest: string;
 }
 
-export type WorkerOut = SnapshotMsg | SmokeResultMsg;
+/** Scope history deltas since the previous TraceMsg (per subscribed net). */
+export interface TraceMsg {
+  type: "trace";
+  /** sim.time when emitted (matches the SnapshotMsg.time just sent). */
+  time: number;
+  deltas: TraceDelta[];
+  /** Recorder was reset this emit (load/recompile) — bridge clears its mirror first. */
+  reset: boolean;
+}
+
+export type WorkerOut = SnapshotMsg | SmokeResultMsg | TraceMsg;
 
 let sim: Simulator | null = null;
 let prevSim: Simulator | null = null;
@@ -47,6 +71,12 @@ let running = false;
 let ticksPerSecond = 2000;
 let tickFloat = 0;
 let lastWall = 0;
+
+/** Per-tick history for subscribed nets. Free when nothing is subscribed. */
+const recorder = new ScopeRecorder();
+/** Max ticks sampled one-by-one per advance; beyond it we sample coarsely so
+ *  a fast sim cannot stall the worker (back-pressuring the snapshot pump). */
+const MAX_CATCHUP = 4096;
 
 function snapshot(): void {
   if (!sim) return;
@@ -58,6 +88,14 @@ function snapshot(): void {
     diagnostics: sim.diagnostics.length,
   };
   (postMessage as (m: unknown, t?: Transferable[]) => void)(msg, [values.buffer]);
+}
+
+/** Post recorded transition deltas (no-op when there is nothing new to send). */
+function emitTrace(): void {
+  const { deltas, reset } = recorder.drain();
+  if (deltas.length === 0 && !reset) return;
+  const msg: TraceMsg = { type: "trace", time: sim?.time ?? 0, deltas, reset };
+  postMessage(msg);
 }
 
 onmessage = (e: MessageEvent<WorkerIn>) => {
@@ -83,7 +121,11 @@ onmessage = (e: MessageEvent<WorkerIn>) => {
       prevDffPaths = new Map(msg.dffPaths);
       tickFloat = sim.time;
       lastWall = performance.now();
+      // Net indices are invalid across re-elaboration: drop history and tell the
+      // bridge to clear its mirror (it re-subscribes fresh net indices next).
+      recorder.reset();
       snapshot();
+      emitTrace();
       return;
     }
     case "poke": {
@@ -91,7 +133,9 @@ onmessage = (e: MessageEvent<WorkerIn>) => {
       for (const node of msg.nodes) sim.setInput(node, msg.value, sim.time);
       if (!running) {
         sim.run(sim.time); // settle immediately while paused
+        if (recorder.size > 0) recorder.sampleAll(sim.time, (n) => sim!.value(n));
         snapshot();
+        emitTrace();
       }
       return;
     }
@@ -102,14 +146,28 @@ onmessage = (e: MessageEvent<WorkerIn>) => {
       return;
     case "step": {
       if (!sim || running) return;
-      sim.run(sim.time + msg.ticks);
+      advanceAndSample(sim, sim.time + msg.ticks, recorder, MAX_CATCHUP);
       tickFloat = sim.time;
       snapshot();
+      emitTrace();
       return;
     }
     case "speed":
       ticksPerSecond = msg.ticksPerSecond;
       return;
+    case "scopeSubscribe": {
+      for (const net of msg.nets) {
+        if (recorder.has(net)) continue;
+        if (sim) recorder.subscribe(net, sim.time, sim.value(net));
+        else recorder.subscribe(net);
+      }
+      emitTrace(); // ship the seeded initial samples immediately
+      return;
+    }
+    case "scopeUnsubscribe": {
+      for (const net of msg.nets) recorder.unsubscribe(net);
+      return;
+    }
     case "smoke": {
       // Determinism gate: run the shared scenario on THIS platform's JS
       // engine and report the trace digest for comparison.
@@ -127,7 +185,8 @@ setInterval(() => {
     tickFloat += ((now - lastWall) / 1000) * ticksPerSecond;
     lastWall = now;
     const target = Math.floor(tickFloat);
-    if (target > sim.time) sim.run(target);
+    advanceAndSample(sim, target, recorder, MAX_CATCHUP); // no-op if target <= sim.time
     snapshot();
+    emitTrace();
   }
 }, 33);
