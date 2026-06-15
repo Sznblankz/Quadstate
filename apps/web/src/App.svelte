@@ -32,46 +32,60 @@
   function goNew() { ctrl.startNewProject(); view = "editor"; }
   function openTemplate(id: TemplateId) { ctrl.openTemplate(id); view = "editor"; }
 
-  // --- Home → Editor portal: the editor mounts immediately (its canvas fit to
-  //     the loaded circuit), and the clicked card preview expands into the
-  //     canvas region and crossfades into the LIVE canvas — a portal into the
-  //     project, not a zoom of a dead image.
-  let portal = $state<{ x: number; y: number; w: number; h: number; thumb: string | null } | null>(null);
+  // --- Home → Editor portal: a shared-element expand. The editor mounts and
+  //     the LIVE canvas (fit to the circuit) does the card-rect → canvas-rect
+  //     motion itself; the thumbnail only bridges the first ~25%, then fades —
+  //     so it feels like the real editor opening, not a screenshot zooming.
+  let portal = $state<{ thumb: string | null } | null>(null);
   function openRecent(id: string, origin?: DOMRect, thumb?: string | null) {
     if (!ctrl.openProjectDraft(id)) return; // preload + fit the project (no canvas yet)
     if (reduceMotion || !origin) { view = "editor"; return; }
-    portal = { x: origin.left, y: origin.top, w: origin.width, h: origin.height, thumb: thumb ?? null };
-    view = "editor";                              // live editor mounts behind the portal
-    setTimeout(() => { portal = null; }, 760);    // crossfade done → fully live editor
+    const card = { x: origin.left, y: origin.top, w: origin.width, h: origin.height };
+    portal = { thumb: thumb ?? null };
+    // Run the expand once the canvas is attached + measured at FULL size, so the
+    // real canvas (not the thumbnail) carries the motion.
+    ctrl.onAttached = () => { ctrl.onAttached = undefined; runPortalExpand(card); };
+    view = "editor";
+    // Safety: if onAttached never fires, don't leave a stray thumbnail.
+    setTimeout(() => { portal = null; }, 900);
   }
 
-  /** Action: expand the card preview from its rect into the editor's canvas
-   *  region, crossfading to the live canvas mid-zoom. Web-Animation driven
-   *  (GPU-smooth); `openRecent`'s timer owns teardown so it can't hang. */
-  function portalZoom(node: HTMLElement, p: { x: number; y: number; w: number; h: number }) {
-    const main = document.querySelector(".app main");
-    const m = main ? main.getBoundingClientRect()
-      : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight } as DOMRect;
-    // Size/position the portal to the canvas region; map it onto the card to start.
-    node.style.left = `${m.left}px`;
-    node.style.top = `${m.top}px`;
-    node.style.width = `${m.width}px`;
-    node.style.height = `${m.height}px`;
-    const sx = m.width ? p.w / m.width : 1;
-    const sy = m.height ? p.h / m.height : 1;
-    const tx = p.x - m.left, ty = p.y - m.top;
-    const expand = node.animate(
-      [
-        { transform: `translate(${tx}px, ${ty}px) scale(${sx}, ${sy})`, borderRadius: "12px" },
-        { transform: "translate(0px, 0px) scale(1, 1)", borderRadius: "0px" },
-      ],
-      { duration: 460, easing: "cubic-bezier(.5,.08,.18,1)", fill: "forwards" },
-    );
-    // Crossfade DURING the zoom: the live canvas (already rendering, fit to the
-    // circuit) shows through as the preview grows — no hard image→editor cut.
-    const fade = node.animate([{ opacity: 1 }, { opacity: 0 }],
-      { duration: 280, delay: 240, easing: "ease-in", fill: "forwards" });
-    return { destroy() { expand.cancel(); fade.cancel(); } };
+  function runPortalExpand(card: { x: number; y: number; w: number; h: number }): void {
+    const host = document.querySelector(".host") as HTMLElement | null;
+    const node = document.querySelector(".portal") as HTMLElement | null;
+    if (!host) { portal = null; return; }
+    const m = host.getBoundingClientRect();
+    const sx = m.width ? card.w / m.width : 1;
+    const sy = m.height ? card.h / m.height : 1;
+    const from = `translate(${card.x - m.left}px, ${card.y - m.top}px) scale(${sx}, ${sy})`;
+    const to = "translate(0px, 0px) scale(1, 1)";
+    const DUR = 460, EASE = "cubic-bezier(.22,.7,.16,1)"; // ease-out settle
+
+    // The LIVE canvas performs the expand — crisp, because it IS the canvas.
+    host.style.transformOrigin = "top left";
+    const hostAnim = host.animate([{ transform: from }, { transform: to }],
+      { duration: DUR, easing: EASE, fill: "forwards" });
+
+    // The thumbnail rides the same path but fades out within the first ~25%,
+    // handing off to the live canvas almost immediately.
+    if (node) {
+      node.style.left = `${m.left}px`; node.style.top = `${m.top}px`;
+      node.style.width = `${m.width}px`; node.style.height = `${m.height}px`;
+      node.animate([{ transform: from }, { transform: to }],
+        { duration: DUR, easing: EASE, fill: "forwards" });
+      node.animate(
+        [{ opacity: 1, offset: 0 }, { opacity: 1, offset: 0.06 }, { opacity: 0, offset: 0.26 }],
+        { duration: DUR, easing: "linear", fill: "forwards" });
+    }
+
+    // Clear the canvas transform after it settles so pointer mapping (which
+    // reads getBoundingClientRect) is unaffected, and drop the thumbnail.
+    setTimeout(() => {
+      hostAnim.cancel();
+      host.style.transform = "";
+      host.style.transformOrigin = "";
+      portal = null;
+    }, DUR + 80);
   }
 
   function renameProject(id: string, name: string) { renameProjectDraft(id, name); recents = listProjects(); }
@@ -372,7 +386,7 @@
 {/if}
 
 {#if portal}
-  <div class="portal" use:portalZoom={portal} style={tokenStyle}>
+  <div class="portal" style={tokenStyle}>
     {#if portal.thumb}<img src={portal.thumb} alt="" />{/if}
   </div>
 {/if}
@@ -528,14 +542,13 @@
 
   .splash-wrap { position: fixed; inset: 0; z-index: 200; transition: opacity .4s ease; }
   .splash-wrap.fade { opacity: 0; pointer-events: none; }
-  /* Home → Editor portal: the editor mounts live underneath; this preview is
-     sized/positioned (imperatively) to the canvas region, expands from the
-     clicked card via portalZoom, and crossfades into the real canvas. */
+  /* Home → Editor portal: only a brief bridge. The live canvas (.host) does the
+     shared-element expand; this thumbnail rides the same path and fades within
+     the first ~25%. Starts hidden until runPortalExpand sizes/positions it. */
   .portal {
-    position: fixed; z-index: 150;
+    position: fixed; z-index: 150; opacity: 0;
     transform-origin: top left;
     background: var(--bg); overflow: hidden;
-    box-shadow: 0 24px 80px rgba(0,0,0,0.5);
     will-change: transform, opacity;
   }
   .portal img { width: 100%; height: 100%; object-fit: cover; display: block; }

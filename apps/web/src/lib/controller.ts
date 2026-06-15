@@ -90,6 +90,10 @@ export class AppController {
   /** Default-editor Ctrl+G: the shell handles naming (prompt) then calls
    *  createChip. Proto mode uses createChipProto (inline rename) instead. */
   onRequestCreateChip?: () => void;
+  /** Fires once the canvas is attached and the view is fit — after the canvas
+   *  has been measured at full size. The Home→Editor portal uses this to start
+   *  the shared-element expand on the real (full-size) canvas. */
+  onAttached?: () => void;
 
   private stack: CanvasStack | null = null;
   private container: HTMLElement | null = null;
@@ -315,6 +319,9 @@ export class AppController {
       this.teardown = null;
     };
     this.pushUi();
+    // Canvas is measured at full size and the view is fit — safe for the shell
+    // to run the Home→Editor expand on the live canvas.
+    this.onAttached?.();
   }
 
   private dispatch(intent: Intent): void {
