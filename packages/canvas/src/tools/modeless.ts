@@ -10,7 +10,7 @@ type PortHit = Extract<NonNullable<HitResult>, { type: "port" }>;
  * Modeless default tool — "the target decides", so there is no Select / Wire /
  * Poke switching. One resting state; the gesture's meaning comes from what it
  * starts on:
- *   tap an input switch (io:in) -> poke it (advance 0 -> 1 -> X -> Z -> 0)
+ *   tap an input switch (io:in) -> toggle it 0 <-> 1 (X/Z are never hand-set)
  *   tap a part / wire           -> select (shift toggles)
  *   tap empty                   -> deselect
  *   drag from a port            -> draw a wire (snaps to a target port)
@@ -46,7 +46,11 @@ export class ModelessTool implements Tool {
     if (pokeId !== null) {
       const comp = ctx.doc.components.get(pokeId)!;
       const cur = typeof comp.props.value === "number" ? comp.props.value : 0;
-      const next = (cur + 1) % 4; // 0 -> 1 -> X -> Z -> 0
+      // User-facing inputs toggle 0 <-> 1 ONLY. X and Z are never set by hand —
+      // they emerge from circuit behaviour (contention/uninitialized -> X,
+      // floating/tri-state -> Z). Forcing X/Z is a dev-only affordance via the
+      // console (window.__logicsim.bridge.poke(id, 2|3)).
+      const next = cur === 0 ? 1 : 0; // 0 -> 1 -> 0 (any X/Z resolves to 0)
       ctx.history.execute(ctx.doc, pokeInput(pokeId, next, ctx.simTick()), ctx.selection);
       ctx.poke(pokeId, next);
       ctx.requestRender();

@@ -3,11 +3,13 @@ import type { Intent } from "../input/types.js";
 import type { Tool, ToolContext } from "./types.js";
 
 /**
- * Poke tool: tap a switch (io:in) to advance its value. Cycles through all
- * four logic states 0 → 1 → X → Z → 0 (engine codes LO/HI/X/Z = 0/1/2/3) so
- * every state is reachable by clicking — the acceptance path for the 4-state
- * signal language. The command records the SIMULATION tick (determinism
- * rule); the bridge forwards the new value to the engine.
+ * DEV/DEBUG ONLY — not wired into the normal editor. Tap a switch (io:in) to
+ * advance through all four logic states 0 → 1 → X → Z → 0 (engine codes
+ * LO/HI/X/Z = 0/1/2/3), so a developer can FORCE X/Z when testing the 4-state
+ * signal language. The user-facing editor (ModelessTool) toggles inputs 0 <-> 1
+ * only — normal users never hand-set X/Z; those emerge from circuit behaviour.
+ * The command records the SIMULATION tick (determinism rule); the bridge
+ * forwards the new value to the engine.
  */
 export class PokeTool implements Tool {
   readonly id = "poke";
@@ -17,7 +19,7 @@ export class PokeTool implements Tool {
     const comp = ctx.doc.components.get(i.target.id);
     if (!comp || comp.part !== "io:in") return;
     const cur = typeof comp.props.value === "number" ? comp.props.value : 0;
-    const next = (cur + 1) % 4; // 0→1→X→Z→0
+    const next = (cur + 1) % 4; // dev cycle: 0→1→X→Z→0
     ctx.history.execute(ctx.doc, pokeInput(comp.id, next, ctx.simTick()), ctx.selection);
     ctx.poke(comp.id, next);
     ctx.requestRender();
