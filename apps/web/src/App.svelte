@@ -3,6 +3,7 @@
   import CanvasHost from "./lib/CanvasHost.svelte";
   import Inspector from "./lib/Inspector.svelte";
   import TimingDiagram from "./lib/TimingDiagram.svelte";
+  import Palette from "./lib/Palette.svelte";
   import HomeView from "./lib/HomeView.svelte";
   import BrandMark from "./lib/BrandMark.svelte";
   import Splash from "./lib/Splash.svelte";
@@ -148,21 +149,6 @@
     return ui.userParts.find((p) => p.id === part)?.name ?? "chip";
   }
 
-  const palette = [
-    { part: "io:in", label: "IN" },
-    { part: "io:out", label: "OUT" },
-    { part: "builtin:and", label: "AND" },
-    { part: "builtin:or", label: "OR" },
-    { part: "builtin:xor", label: "XOR" },
-    { part: "builtin:nand", label: "NAND" },
-    { part: "builtin:nor", label: "NOR" },
-    { part: "builtin:not", label: "NOT" },
-    { part: "builtin:tri", label: "TRI" },
-    { part: "builtin:dff", label: "DFF" },
-    { part: "builtin:clock", label: "CLK" },
-    { part: "builtin:const", label: "CONST" },
-  ];
-
   // Accepts decimal, 0x hex, or 0b binary (Number handles all three). Returns
   // null for blanks/garbage so the field reverts instead of zeroing.
   function parseValue(s: string): number | null {
@@ -262,39 +248,7 @@
   </header>
 
   <div class="body">
-    <aside class="palette">
-      <div class="rail-label">BUILT-IN</div>
-      {#each palette as p}
-        <button
-          class="part"
-          class:active={ui.placePart === p.part}
-          title="Drag onto the canvas, or click to place repeatedly"
-          onpointerdown={(e) => ctrl.beginPaletteDrag(p.part, e)}
-        >{p.label}</button>
-      {/each}
-      {#if ui.libraryParts.length > 0}
-        <div class="rail-label">LIBRARY</div>
-        {#each ui.libraryParts as p (p.id)}
-          <button
-            class="part lib"
-            class:active={ui.placePart === p.id}
-            title="Drag onto the canvas, or click to place repeatedly"
-            onpointerdown={(e) => ctrl.beginPaletteDrag(p.id, e)}
-          >{p.name}</button>
-        {/each}
-      {/if}
-      {#if ui.userParts.length > 0}
-        <div class="rail-label">MY CHIPS</div>
-        {#each ui.userParts as p (p.id)}
-          <button
-            class="part user"
-            class:active={ui.placePart === p.id}
-            title="Drag onto the canvas, or click to place repeatedly"
-            onpointerdown={(e) => ctrl.beginPaletteDrag(p.id, e)}
-          >{p.name}</button>
-        {/each}
-      {/if}
-    </aside>
+    <Palette {ctrl} placePart={ui.placePart} libraryParts={ui.libraryParts} userParts={ui.userParts} />
 
     <main>
       <div class="canvas-region">
@@ -462,22 +416,10 @@
 
   .body { display: flex; flex: 1 1 auto; min-height: 0; }
 
-  .palette {
-    display: flex; flex-direction: column; gap: 3px;
-    width: 132px; flex: 0 0 auto; padding: 12px 10px; overflow-y: auto;
-    background: var(--bg); border-right: 1px solid var(--hairline);
-  }
   .rail-label {
     font-size: 11px; font-weight: 600; letter-spacing: 0.10em;
     color: var(--text3); margin: 6px 2px 6px;
   }
-  .palette button.part {
-    text-align: left; padding: 7px 10px; border-color: transparent; background: transparent;
-  }
-  .palette button.part:hover { background: var(--surface2); }
-  .palette button.part.active { background: var(--accentQuiet); border-left: 2px solid var(--accent); border-radius: 0 8px 8px 0; }
-  .palette button.user { color: var(--text1); }
-  .palette button.lib { color: var(--text1); }
 
   main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .canvas-region { flex: 1 1 auto; min-width: 0; min-height: 0; position: relative; }

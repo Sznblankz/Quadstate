@@ -589,13 +589,13 @@ export class AppController {
     this.pushUi();
   }
 
-  setPlacePart(part: string): void {
+  setPlacePart(part: string, extra: Record<string, number> = {}): void {
     if (this.proto) {
       this.armStamp(part, "palette");
       return;
     }
     this.active.deactivate?.(this.ctx);
-    this.place = new PlaceTool(part, this.placeExtra(part));
+    this.place = new PlaceTool(part, { ...this.placeExtra(part), ...extra });
     this.placePart = part;
     this.active = this.place;
     this.pushUi();
@@ -610,7 +610,7 @@ export class AppController {
    * two routes coexist: drag = place once, click = arm the repeat stamp.
    * Active in the default editor and the ?proto=1 harness alike.
    */
-  beginPaletteDrag(part: string, e: PointerEvent): void {
+  beginPaletteDrag(part: string, e: PointerEvent, extra: Record<string, number> = {}): void {
     (e.currentTarget as HTMLElement | null)?.blur();
     if (this.diving) { this.refuseDiveEdit(); return; } // read-only live instance
     const start = { x: e.clientX, y: e.clientY };
@@ -645,13 +645,13 @@ export class AppController {
       delete this.overlay.stampGhost;
       this.dirtyStatic = true;
       if (!dragging) {
-        this.setPlacePart(part); // plain click: arm stamp mode (proto or default)
+        this.setPlacePart(part, extra); // plain click: arm stamp mode (proto or default)
         return;
       }
       const w = overCanvas(ev);
       if (w) {
         // One-shot placement via the place tool's tap path (io naming etc.).
-        new PlaceTool(part, this.placeExtra(part)).intent(
+        new PlaceTool(part, { ...this.placeExtra(part), ...extra }).intent(
           { type: "tap", wx: w.wx, wy: w.wy, target: null, shift: false }, this.ctx);
         this.logger.log("paletteDrop", { part });
       } else {
