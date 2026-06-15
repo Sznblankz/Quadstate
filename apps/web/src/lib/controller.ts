@@ -15,6 +15,8 @@ import {
   type Component, type LibraryPart, type StorageProvider, type Wire,
 } from "@logicsim/document";
 import { PartLibrary, exportBundle, importBundle } from "@logicsim/schema";
+import type { Transition } from "@logicsim/engine";
+import { mergeBusTransitions } from "./sim/timeline.js";
 import { definitionFromInterior } from "./editdef.js";
 import { buildTemplate, TEMPLATES, type TemplateId } from "./templates.js";
 import { SimBridge } from "./sim/bridge.js";
@@ -42,6 +44,20 @@ export interface UiState {
   watches: Array<{ id: number; label: string; value: number | null; width: number; hex: string | null; bin: string | null }>;
   /** A single, not-yet-watched wire is selected (enables "+ Watch"). */
   canWatch: boolean;
+  /** Timing-diagram lanes (one per watched wire), derived from bridge.scopeHistory.
+   *  `transitions` are 0/1/X/Z (or MIXED=5 for buses); history before `oldestTick`
+   *  is not authoritative (ring-evicted); `gone` = the wire no longer resolves. */
+  timeline: {
+    now: number;
+    lanes: Array<{
+      id: number;
+      label: string;
+      width: number;
+      transitions: Array<{ tick: number; value: number }>;
+      oldestTick: number;
+      gone: boolean;
+    }>;
+  };
   /** Editable numeric prop of the selected part (io bus width / constant value). */
   partConfig: { id: number; type: "io" | "const"; value: number; label: string; max: number } | null;
   /** Selected single wire's state when X/Z, enabling the Why? button (P3). */
@@ -342,6 +358,9 @@ export class AppController {
       this.dirtySignals = true;
       this.pushUi();
     };
+    // Refresh the timeline when scope history streams in — covers the paused
+    // case (e.g. adding a watch while paused) where no snapshot frame follows.
+    this.bridge.onTrace = () => { this.pushUi(); };
 
     let raf = 0;
     const frame = () => {
@@ -1286,6 +1305,34 @@ export class AppController {
       });
   }
 
+  /** Build the timing-diagram lanes from the watched wires + bridge.scopeHistory.
+   *  Single-bit lanes reference the recorded transition array directly; buses are
+   *  merged into an aggregate (0/1/X/Z/MIXED) stream from the common horizon. */
+  private timelineState(): UiState["timeline"] {
+    const now = this.bridge.simTime;
+    const lanes = this.watches
+      .filter((id) => this.doc.wires.has(id))
+      .map((id) => {
+        const bus = this.bridge.wireBus.get(id);
+        const gone = !bus || bus.length === 0;
+        const width = bus?.length ?? 1;
+        let transitions: Array<{ tick: number; value: number }> = [];
+        let oldestTick = now;
+        if (!gone) {
+          if (width === 1) {
+            transitions = this.bridge.scopeHistory.get(bus![0]) ?? [];
+            oldestTick = transitions.length ? transitions[0].tick : now;
+          } else {
+            const merged = mergeBusTransitions(bus!, this.bridge.scopeHistory, aggregateBus);
+            transitions = merged.trans;
+            oldestTick = merged.trans.length ? merged.oldestTick : now;
+          }
+        }
+        return { id, label: this.watchLabel(id), width, transitions, oldestTick, gone };
+      });
+    return { now, lanes };
+  }
+
   // -------------------------------------------------------------- P3: why?
   private whyWireId: number | null = null;
 
@@ -1673,6 +1720,7 @@ export class AppController {
       canCreateChip,
       watches: this.watchRows(),
       canWatch,
+      timeline: this.timelineState(),
       partConfig: this.partConfig(),
       whyState: this.selectedWhyState(),
       why: this.whyWireId !== null ? this.computeWhy(this.whyWireId) : null,

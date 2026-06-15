@@ -2,6 +2,7 @@
   import { MIXED, TOKENS, signalColor } from "@logicsim/canvas";
   import CanvasHost from "./lib/CanvasHost.svelte";
   import Inspector from "./lib/Inspector.svelte";
+  import TimingDiagram from "./lib/TimingDiagram.svelte";
   import HomeView from "./lib/HomeView.svelte";
   import BrandMark from "./lib/BrandMark.svelte";
   import Splash from "./lib/Splash.svelte";
@@ -99,11 +100,14 @@
     status: "place parts to begin", statusOk: false,
     canUndo: false, canRedo: false, simTime: 0,
     userParts: [], libraryParts: [], inspected: null, canCreateChip: false,
-    watches: [], canWatch: false, partConfig: null,
+    watches: [], canWatch: false, timeline: { now: 0, lanes: [] }, partConfig: null,
     whyState: null, why: null,
     proto: false, dive: [], diving: false, diveRefusal: false, editing: null,
     pendingWidth: null, rename: null,
   });
+
+  let scopeCollapsed = $state(false);
+  let scopeHeight = $state(200);
 
   const VAL = ["0", "1", "X", "Z"];
   const valLabel = (v: number | null) => (v == null ? "—" : VAL[v]);
@@ -293,28 +297,31 @@
     </aside>
 
     <main>
-      <CanvasHost {ctrl} />
-      {#if ui.placePart}
-        <div class="stamp-banner">Stamping <b>{stampLabel(ui.placePart)}</b> — click to place, Esc to stop</div>
-      {/if}
-      {#if ui.diveRefusal}
-        <div class="dive-refusal" role="status">
-          <span>This is a live instance — its contents are read-only.</span>
-          <button class="edit-def" onclick={() => ctrl.requestEditDefinition()}>Edit definition</button>
-          <button class="icon-x" title="Dismiss" onclick={() => ctrl.dismissDiveRefusal()}>×</button>
-        </div>
-      {/if}
-      {#if ui.proto && ui.rename}
-        <input class="rename" style="left: {ui.rename.sx}px; top: {ui.rename.sy}px"
-          use:autofocus bind:value={renameValue} onkeydown={renameKeydown}
-          onblur={() => ctrl.commitRename(renameValue)} />
-      {/if}
-      {#if !hintDismissed && !ui.editing && !ui.diving}
-        <div class="hint" role="note">
-          <span><b>Tip:</b> drag a part from the palette · click an input to toggle it · drag from one pin to another to wire.</span>
-          <button class="icon-x" title="Got it" onclick={dismissHint}>×</button>
-        </div>
-      {/if}
+      <div class="canvas-region">
+        <CanvasHost {ctrl} />
+        {#if ui.placePart}
+          <div class="stamp-banner">Stamping <b>{stampLabel(ui.placePart)}</b> — click to place, Esc to stop</div>
+        {/if}
+        {#if ui.diveRefusal}
+          <div class="dive-refusal" role="status">
+            <span>This is a live instance — its contents are read-only.</span>
+            <button class="edit-def" onclick={() => ctrl.requestEditDefinition()}>Edit definition</button>
+            <button class="icon-x" title="Dismiss" onclick={() => ctrl.dismissDiveRefusal()}>×</button>
+          </div>
+        {/if}
+        {#if ui.proto && ui.rename}
+          <input class="rename" style="left: {ui.rename.sx}px; top: {ui.rename.sy}px"
+            use:autofocus bind:value={renameValue} onkeydown={renameKeydown}
+            onblur={() => ctrl.commitRename(renameValue)} />
+        {/if}
+        {#if !hintDismissed && !ui.editing && !ui.diving}
+          <div class="hint" role="note">
+            <span><b>Tip:</b> drag a part from the palette · click an input to toggle it · drag from one pin to another to wire.</span>
+            <button class="icon-x" title="Got it" onclick={dismissHint}>×</button>
+          </div>
+        {/if}
+      </div>
+      <TimingDiagram timeline={ui.timeline} bind:collapsed={scopeCollapsed} bind:height={scopeHeight} />
     </main>
 
     <aside class="rail">
@@ -470,7 +477,8 @@
   .palette button.user { color: var(--text1); }
   .palette button.lib { color: var(--text1); }
 
-  main { flex: 1 1 auto; min-width: 0; position: relative; }
+  main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .canvas-region { flex: 1 1 auto; min-width: 0; min-height: 0; position: relative; }
 
   .rail {
     width: 220px; flex: 0 0 auto; display: flex; flex-direction: column;
