@@ -231,7 +231,8 @@ export class AppController {
       // freezes while moves are intercepted and resumes on release).
       if (this.proto && this.spaceHeld && e.buttons > 0) {
         if (this.spaceLast) {
-          this.viewport.panByScreen(-(sx - this.spaceLast.sx), -(sy - this.spaceLast.sy));
+          // Grab-the-paper (content follows the cursor), matching dispatch pan.
+          this.viewport.panByScreen(sx - this.spaceLast.sx, sy - this.spaceLast.sy);
           this.dirtyStatic = true;
           this.dirtySignals = true;
         }
@@ -313,7 +314,10 @@ export class AppController {
 
   private dispatch(intent: Intent): void {
     if (intent.type === "pan") {
-      this.viewport.panByScreen(-intent.dsx, -intent.dsy);
+      // Grab-the-paper: the content follows the cursor (drag right -> content
+      // right, drag down -> content down). panByScreen moves the camera, so we
+      // pass the pointer delta directly (no negation) for direct manipulation.
+      this.viewport.panByScreen(intent.dsx, intent.dsy);
       this.dirtyStatic = true;
       this.dirtySignals = true;
       return;
