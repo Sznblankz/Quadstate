@@ -72,6 +72,22 @@ describe("project files", () => {
       .toThrow(/unknown part/);
   });
 
+  it("round-trips tracked signals (wire + path), defaulting to none for older files", () => {
+    const { doc, lib, userParts } = chipProject();
+    const tracked = [
+      { kind: "wire" as const, wireId: 7 },
+      { kind: "path" as const, path: "c1/y" },
+    ];
+    const json = projectToJson(doc, userParts, lib, tracked);
+    const { tracked: back } = projectFromJson(json, new PartLibrary());
+    expect(back).toEqual(tracked);
+
+    // Older files (no trackedSignals field) load with an empty list, not undefined.
+    const legacy = JSON.parse(projectToJson(doc, userParts, lib));
+    delete legacy.trackedSignals;
+    expect(projectFromJson(JSON.stringify(legacy), new PartLibrary()).tracked).toEqual([]);
+  });
+
   it("replaceDocumentContents preserves instance identity", () => {
     const { doc } = chipProject();
     const target = new CircuitDocument();

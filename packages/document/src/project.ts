@@ -4,6 +4,13 @@ import { fromJSON, toJSON, type DocumentJson } from "./serialize.js";
 
 export const FILE_VERSION = 1;
 
+/** A signal tracked in the Watches panel / timing diagram. Persisted by STABLE
+ *  identity (wire EntityId or hierarchical probe path) — never raw net indices,
+ *  which are reassigned on every re-elaboration. Re-resolved on each compile. */
+export type TrackedSignal =
+  | { kind: "wire"; wireId: number }
+  | { kind: "path"; path: string };
+
 export interface ProjectPartEntry {
   /** Content-hash id as registered when the part was created. Verified
    *  against a re-hash on load — a mismatch means corruption or an
@@ -30,6 +37,9 @@ export interface ProjectFile {
    *  backward compatibility; older files treat every part as a palette
    *  entry. */
   palette?: Array<{ id: string; name: string }>;
+  /** Watched / scoped signals (stable wire ids or probe paths). Optional —
+   *  older files load with none. */
+  trackedSignals?: TrackedSignal[];
 }
 
 /**
@@ -50,6 +60,7 @@ export function projectToJson(
   doc: CircuitDocument,
   userParts: Array<{ id: string; name: string }>,
   lib: PartLibrary,
+  tracked: TrackedSignal[] = [],
 ): string {
   // Serialize the full dependency closure of everything the project uses —
   // palette chips AND parts the document references (which may be orphans not
@@ -74,14 +85,16 @@ export function projectToJson(
     return { id, name: nameOf.get(id) ?? def.name, def };
   });
   const palette = userParts.map((p) => ({ id: p.id, name: p.name }));
-  const file: ProjectFile = { fileVersion: FILE_VERSION, document: toJSON(doc), parts, palette };
+  const file: ProjectFile = {
+    fileVersion: FILE_VERSION, document: toJSON(doc), parts, palette, trackedSignals: tracked,
+  };
   return JSON.stringify(file, null, 2);
 }
 
 export function projectFromJson(
   json: string,
   lib: PartLibrary,
-): { doc: CircuitDocument; userParts: Array<{ id: string; name: string }> } {
+): { doc: CircuitDocument; userParts: Array<{ id: string; name: string }>; tracked: TrackedSignal[] } {
   const file = JSON.parse(json) as ProjectFile;
   if (file.fileVersion !== FILE_VERSION) {
     throw new Error(`unsupported project file version ${file.fileVersion}`);
@@ -105,7 +118,7 @@ export function projectFromJson(
       throw new Error(`component ${comp.id} references unknown part "${comp.part}"`);
     }
   }
-  return { doc, userParts };
+  return { doc, userParts, tracked: file.trackedSignals ?? [] };
 }
 
 /** Replace the contents of `target` with `source` in place, preserving

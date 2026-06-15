@@ -17,5 +17,5 @@ export { registerStandardLibrary, type LibraryPart } from "./library.js";
 export { computeNetGroups, groupPorts } from "./nets.js";
 export {
   FILE_VERSION, projectFromJson, projectToJson, replaceDocumentContents,
-  type ProjectFile, type ProjectPartEntry, type StorageProvider,
+  type ProjectFile, type ProjectPartEntry, type StorageProvider, type TrackedSignal,
 } from "./project.js";

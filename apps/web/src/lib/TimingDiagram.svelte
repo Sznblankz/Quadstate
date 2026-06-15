@@ -2,8 +2,16 @@
   import { signalColor, TOKENS, MIXED } from "@logicsim/canvas";
   import type { UiState } from "./controller.js";
 
-  let { timeline, collapsed = $bindable(false), height = $bindable(200) }:
-    { timeline: UiState["timeline"]; collapsed?: boolean; height?: number } = $props();
+  let {
+    timeline, canAdd = false, onAddSelected = () => {},
+    collapsed = $bindable(false), height = $bindable(200),
+  }: {
+    timeline: UiState["timeline"];
+    canAdd?: boolean;
+    onAddSelected?: () => void;
+    collapsed?: boolean;
+    height?: number;
+  } = $props();
 
   let canvas = $state<HTMLCanvasElement | null>(null);
   let cursorTick = $state<number | null>(null); // null = follow live (right edge)
@@ -225,6 +233,8 @@
     <span class="title">TIMING</span>
     <span class="tick">t = {cursorTick ?? timeline.now}</span>
     <span class="spacer"></span>
+    <button class="add" disabled={!canAdd} onclick={onAddSelected}
+      title="Add the selected wire to the timing diagram">+ wire</button>
     <button class="collapse" title={collapsed ? "Expand" : "Collapse"}
       onclick={() => (collapsed = !collapsed)}>{collapsed ? "▴" : "▾"}</button>
   </header>
@@ -266,6 +276,12 @@
     font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 6px;
   }
   .collapse:hover { background: var(--surface3); color: var(--text1); }
+  .add {
+    background: transparent; border: 1px solid var(--hairline); color: var(--text2);
+    font-size: 11px; cursor: pointer; padding: 3px 8px; border-radius: 6px;
+  }
+  .add:hover:not(:disabled) { background: var(--surface3); color: var(--text1); }
+  .add:disabled { opacity: 0.4; cursor: default; }
   .empty {
     flex: 1; display: flex; align-items: center; justify-content: center;
     color: var(--text3); font-size: 13px; padding: 20px;

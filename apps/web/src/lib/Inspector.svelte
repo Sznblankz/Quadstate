@@ -76,6 +76,8 @@
           <span class="val" style="color: {v === null ? 'var(--text3)' : signalColor(v)}">
             {v === null ? "—" : VAL[v]}
           </span>
+          <button class="scope-add" title="Add to timing diagram"
+            onclick={() => ctrl.addTrackedPath(r.path)}>+scope</button>
         {/if}
       </div>
     {/each}
@@ -109,6 +111,13 @@
   .lbl { color: var(--label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lbl.inst { color: var(--text1); }
   .val { margin-left: auto; font-weight: 700; font-family: ui-monospace, monospace; }
+  .scope-add {
+    flex: 0 0 auto; background: transparent; border: 1px solid var(--hairline);
+    color: var(--text3); border-radius: 5px; padding: 1px 5px; font: inherit;
+    font-size: 10px; cursor: pointer; opacity: 0; transition: opacity 0.1s;
+  }
+  .row:hover .scope-add { opacity: 1; }
+  .scope-add:hover { background: var(--surface2); color: var(--text1); }
   .tw {
     background: none; border: none; color: var(--text3); cursor: pointer;
     padding: 0; width: 14px; font-size: 11px;

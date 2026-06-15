@@ -321,7 +321,9 @@
           </div>
         {/if}
       </div>
-      <TimingDiagram timeline={ui.timeline} bind:collapsed={scopeCollapsed} bind:height={scopeHeight} />
+      <TimingDiagram timeline={ui.timeline} canAdd={ui.canWatch}
+        onAddSelected={() => ctrl.addWatchSelected()}
+        bind:collapsed={scopeCollapsed} bind:height={scopeHeight} />
     </main>
 
     <aside class="rail">
@@ -377,11 +379,11 @@
       <div class="rail-section watches">
         <div class="rail-label">WATCHES</div>
         {#if ui.watches.length > 0}
-          {#each ui.watches as w (w.id)}
-            <div class="watch-row">
+          {#each ui.watches as w (w.key)}
+            <div class="watch-row" class:gone={w.gone}>
               <span class="watch-name">{w.label}{#if w.width > 1}<span class="wtag">[{w.width}]</span>{/if}</span>
-              <span class="watch-val" style="color: {valColor(w.value)}" title={w.bin ?? ""}>{w.width > 1 ? w.hex : valLabel(w.value)}</span>
-              <button class="icon-x" title="Remove" onclick={() => ctrl.removeWatch(w.id)}>×</button>
+              <span class="watch-val" style="color: {w.gone ? 'var(--text3)' : valColor(w.value)}" title={w.gone ? 'unresolved' : (w.bin ?? '')}>{w.gone ? '—' : (w.width > 1 ? w.hex : valLabel(w.value))}</span>
+              <button class="icon-x" title="Remove" onclick={() => ctrl.removeTracked(w.key)}>×</button>
             </div>
           {/each}
         {:else if !ui.canWatch}
@@ -487,6 +489,7 @@
   .rail-section { padding: 12px 14px; border-bottom: 1px solid var(--hairline); }
   .rail-hint { font-size: 12px; color: var(--text3); margin-top: 6px; line-height: 1.5; }
   .watch-row { display: flex; align-items: center; gap: 8px; height: 30px; font-size: 13px; }
+  .watch-row.gone { opacity: 0.5; }
   .watch-name { flex: 1; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .watch-val { font-family: ui-monospace, monospace; font-weight: 600; }
   .wtag { font-family: ui-monospace, monospace; font-size: 11px; color: var(--text3); margin-left: 5px; }

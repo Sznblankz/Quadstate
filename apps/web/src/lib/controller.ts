@@ -12,7 +12,7 @@ import {
   CircuitDocument, History, Selection, addComponent, addWire, computeNetGroups,
   createChipFromSelection, groupPorts, projectFromJson, projectToJson, registerStandardLibrary,
   removeEntities, replaceDocumentContents, setProp,
-  type Component, type LibraryPart, type StorageProvider, type Wire,
+  type Component, type LibraryPart, type StorageProvider, type TrackedSignal, type Wire,
 } from "@logicsim/document";
 import { PartLibrary, exportBundle, importBundle } from "@logicsim/schema";
 import type { Transition } from "@logicsim/engine";
@@ -22,6 +22,11 @@ import { buildTemplate, TEMPLATES, type TemplateId } from "./templates.js";
 import { SimBridge } from "./sim/bridge.js";
 import { detectStorage } from "./storage.js";
 import { saveProjectDraft, loadProjectDraft, newProjectId } from "./draft.js";
+
+/** Stable, persistable key for a tracked signal (wire id or probe path). */
+function trackKey(t: TrackedSignal): string {
+  return t.kind === "wire" ? `wire:${t.wireId}` : `path:${t.path}`;
+}
 
 export interface UiState {
   placePart: string | null;
@@ -41,16 +46,16 @@ export interface UiState {
   canCreateChip: boolean;
   /** Watched wires with their live value (P2). For buses (width>1) `value` is
    *  the aggregate state code and `hex`/`bin` carry the formatted bus value. */
-  watches: Array<{ id: number; label: string; value: number | null; width: number; hex: string | null; bin: string | null }>;
-  /** A single, not-yet-watched wire is selected (enables "+ Watch"). */
+  watches: Array<{ key: string; label: string; value: number | null; width: number; hex: string | null; bin: string | null; gone: boolean }>;
+  /** A single, not-yet-tracked wire is selected (enables "+ Watch"). */
   canWatch: boolean;
-  /** Timing-diagram lanes (one per watched wire), derived from bridge.scopeHistory.
+  /** Timing-diagram lanes (one per tracked signal), derived from bridge.scopeHistory.
    *  `transitions` are 0/1/X/Z (or MIXED=5 for buses); history before `oldestTick`
-   *  is not authoritative (ring-evicted); `gone` = the wire no longer resolves. */
+   *  is not authoritative (ring-evicted); `gone` = the signal no longer resolves. */
   timeline: {
     now: number;
     lanes: Array<{
-      id: number;
+      key: string;
       label: string;
       width: number;
       transitions: Array<{ tick: number; value: number }>;
@@ -1198,7 +1203,7 @@ export class AppController {
     for (const w of [...this.doc.wires.values()]) this.doc.wires.delete(w.id);
     for (const comp of [...this.doc.components.values()]) this.doc.components.delete(comp.id);
     this.userParts = [];
-    this.watches = [];
+    this.tracked = [];
     this.whyWireId = null;
     this.selection.clear();
     this.recompile();
@@ -1220,7 +1225,7 @@ export class AppController {
     if (!d) return false;
     this.projectId = id;
     this.projectName = d.name;
-    this.watches = [];
+    this.tracked = [];
     this.whyWireId = null;
     const ok = this.loadProjectString(d.json) === null;
     if (ok) {
@@ -1239,34 +1244,74 @@ export class AppController {
     this.pendingFit = true;
   }
 
-  // ----------------------------------------------------------- P2: watches
-  private watches: number[] = [];
+  // -------------------------------- P2/P4: tracked signals (Watches + timing scope)
+  // ONE shared list backs both the Watches rail and the timing diagram. Entries
+  // are kept by STABLE identity (wire id or probe path) and re-resolved to engine
+  // net indices on every compile (net indices are not stable across recompiles).
+  private tracked: TrackedSignal[] = [];
 
-  /** Add the selected wire(s) to the watch list. */
+  private isTracked(t: TrackedSignal): boolean {
+    const key = trackKey(t);
+    return this.tracked.some((x) => trackKey(x) === key);
+  }
+
+  /** Add the selected wire(s) to the tracked list (canvas selection → scope). */
   addWatchSelected(): void {
     for (const id of this.selection.ids()) {
-      if (this.doc.wires.has(id) && !this.watches.includes(id)) this.watches.push(id);
+      if (this.doc.wires.has(id)) this.addTrackedWire(id);
     }
+  }
+
+  /** Track a wire by id. Idempotent. */
+  addTrackedWire(wireId: number): void {
+    if (!this.doc.wires.has(wireId)) return;
+    const t: TrackedSignal = { kind: "wire", wireId };
+    if (this.isTracked(t)) return;
+    this.tracked.push(t);
     this.syncScopeSubscription();
+    this.autosaveDraft();
     this.pushUi();
   }
 
-  removeWatch(id: number): void {
-    this.watches = this.watches.filter((w) => w !== id);
+  /** Track a hierarchical net by probe path (Inspector "+scope"). Idempotent. */
+  addTrackedPath(path: string): void {
+    const t: TrackedSignal = { kind: "path", path };
+    if (this.isTracked(t)) return;
+    this.tracked.push(t);
     this.syncScopeSubscription();
+    this.autosaveDraft();
     this.pushUi();
   }
 
-  /** Resolve the watched wires to current engine net indices and (re)subscribe
-   *  the worker so their 0/1/X/Z history is recorded for the timing diagram.
-   *  Net indices are not stable across recompiles, so re-derive from the fresh
-   *  wireBus every time (the worker resets its recorder on each load). */
+  /** Remove a tracked signal by its stable key. */
+  removeTracked(key: string): void {
+    this.tracked = this.tracked.filter((t) => trackKey(t) !== key);
+    this.syncScopeSubscription();
+    this.autosaveDraft();
+    this.pushUi();
+  }
+
+  /** Resolve a tracked signal to current engine net indices (null if it no longer
+   *  resolves) plus a display label. */
+  private resolveTracked(t: TrackedSignal): { nets: number[] | null; label: string } {
+    if (t.kind === "wire") {
+      const label = this.watchLabel(t.wireId);
+      if (!this.doc.wires.has(t.wireId)) return { nets: null, label };
+      const bus = this.bridge.wireBus.get(t.wireId);
+      return { nets: bus && bus.length ? bus : null, label };
+    }
+    const nets = this.bridge.elab?.resolveNet(t.path) ?? null;
+    const label = t.path.split("/").filter(Boolean).pop() || t.path;
+    return { nets: nets && nets.length ? nets : null, label };
+  }
+
+  /** Re-resolve every tracked signal to fresh net indices and (re)subscribe the
+   *  worker so its 0/1/X/Z history is recorded. Re-run on every recompile. */
   private syncScopeSubscription(): void {
     const nets: number[] = [];
-    for (const id of this.watches) {
-      if (!this.doc.wires.has(id)) continue;
-      const bus = this.bridge.wireBus.get(id);
-      if (bus) nets.push(...bus);
+    for (const t of this.tracked) {
+      const { nets: resolved } = this.resolveTracked(t);
+      if (resolved) nets.push(...resolved);
     }
     this.bridge.scopeResubscribe([...new Set(nets)]);
   }
@@ -1285,51 +1330,48 @@ export class AppController {
   }
 
   private watchRows(): UiState["watches"] {
-    return this.watches
-      .filter((id) => this.doc.wires.has(id))
-      .map((id) => {
-        const bus = this.bridge.wireBus.get(id);
-        const vals = bus && this.bridge.netValues
-          ? bus.map((n) => this.bridge.netValues![n])
-          : null;
-        if (!vals || vals.length === 0) {
-          return { id, label: this.watchLabel(id), value: null, width: 1, hex: null, bin: null };
-        }
-        const width = vals.length;
-        const value = width === 1 ? vals[0] : aggregateBus(vals);
-        return {
-          id, label: this.watchLabel(id), value, width,
-          hex: width > 1 ? busHex(vals) : null,
-          bin: width > 1 ? busBin(vals) : null,
-        };
-      });
+    return this.tracked.map((t) => {
+      const key = trackKey(t);
+      const { nets, label } = this.resolveTracked(t);
+      const vals = nets && this.bridge.netValues ? nets.map((n) => this.bridge.netValues![n]) : null;
+      if (!vals || vals.length === 0) {
+        return { key, label, value: null, width: nets?.length ?? 1, hex: null, bin: null, gone: !nets };
+      }
+      const width = vals.length;
+      const value = width === 1 ? vals[0] : aggregateBus(vals);
+      return {
+        key, label, value, width,
+        hex: width > 1 ? busHex(vals) : null,
+        bin: width > 1 ? busBin(vals) : null,
+        gone: false,
+      };
+    });
   }
 
-  /** Build the timing-diagram lanes from the watched wires + bridge.scopeHistory.
+  /** Build the timing-diagram lanes from the tracked signals + bridge.scopeHistory.
    *  Single-bit lanes reference the recorded transition array directly; buses are
    *  merged into an aggregate (0/1/X/Z/MIXED) stream from the common horizon. */
   private timelineState(): UiState["timeline"] {
     const now = this.bridge.simTime;
-    const lanes = this.watches
-      .filter((id) => this.doc.wires.has(id))
-      .map((id) => {
-        const bus = this.bridge.wireBus.get(id);
-        const gone = !bus || bus.length === 0;
-        const width = bus?.length ?? 1;
-        let transitions: Array<{ tick: number; value: number }> = [];
-        let oldestTick = now;
-        if (!gone) {
-          if (width === 1) {
-            transitions = this.bridge.scopeHistory.get(bus![0]) ?? [];
-            oldestTick = transitions.length ? transitions[0].tick : now;
-          } else {
-            const merged = mergeBusTransitions(bus!, this.bridge.scopeHistory, aggregateBus);
-            transitions = merged.trans;
-            oldestTick = merged.trans.length ? merged.oldestTick : now;
-          }
+    const lanes = this.tracked.map((t) => {
+      const key = trackKey(t);
+      const { nets, label } = this.resolveTracked(t);
+      const gone = !nets;
+      const width = nets?.length ?? 1;
+      let transitions: Array<{ tick: number; value: number }> = [];
+      let oldestTick = now;
+      if (nets) {
+        if (width === 1) {
+          transitions = this.bridge.scopeHistory.get(nets[0]) ?? [];
+          oldestTick = transitions.length ? transitions[0].tick : now;
+        } else {
+          const merged = mergeBusTransitions(nets, this.bridge.scopeHistory, aggregateBus);
+          transitions = merged.trans;
+          oldestTick = merged.trans.length ? merged.oldestTick : now;
         }
-        return { id, label: this.watchLabel(id), width, transitions, oldestTick, gone };
-      });
+      }
+      return { key, label, width, transitions, oldestTick, gone };
+    });
     return { now, lanes };
   }
 
@@ -1472,16 +1514,19 @@ export class AppController {
 
   /** Project JSON: document + the chip library it depends on. */
   serializeProject(): string {
-    return projectToJson(this.doc, this.userParts, this.lib);
+    return projectToJson(this.doc, this.userParts, this.lib, this.tracked);
   }
 
   /** Load project JSON in place. Returns an error message or null. */
   loadProjectString(json: string): string | null {
     try {
-      const { doc, userParts } = projectFromJson(json, this.lib);
+      const { doc, userParts, tracked } = projectFromJson(json, this.lib);
       this.resetDive();
       replaceDocumentContents(this.doc, doc);
       this.userParts = userParts;
+      // Restore tracked signals; drop wire entries whose wire no longer exists
+      // (path entries are kept — they re-resolve, or show as unresolved/gone).
+      this.tracked = tracked.filter((t) => t.kind === "path" || this.doc.wires.has(t.wireId));
       this.history.clear();
       this.selection.clear();
       this.recompile();
@@ -1694,7 +1739,8 @@ export class AppController {
     }
     const canCreateChip = this.canChipSelection;
     const sel = this.selection.ids();
-    const canWatch = sel.length === 1 && this.doc.wires.has(sel[0]) && !this.watches.includes(sel[0]);
+    const canWatch = sel.length === 1 && this.doc.wires.has(sel[0])
+      && !this.isTracked({ kind: "wire", wireId: sel[0] });
     let rename: UiState["rename"] = null;
     if (this.renameState) {
       const comp = this.doc.components.get(this.renameState.componentId);
