@@ -1228,12 +1228,28 @@ export class AppController {
     for (const id of this.selection.ids()) {
       if (this.doc.wires.has(id) && !this.watches.includes(id)) this.watches.push(id);
     }
+    this.syncScopeSubscription();
     this.pushUi();
   }
 
   removeWatch(id: number): void {
     this.watches = this.watches.filter((w) => w !== id);
+    this.syncScopeSubscription();
     this.pushUi();
+  }
+
+  /** Resolve the watched wires to current engine net indices and (re)subscribe
+   *  the worker so their 0/1/X/Z history is recorded for the timing diagram.
+   *  Net indices are not stable across recompiles, so re-derive from the fresh
+   *  wireBus every time (the worker resets its recorder on each load). */
+  private syncScopeSubscription(): void {
+    const nets: number[] = [];
+    for (const id of this.watches) {
+      if (!this.doc.wires.has(id)) continue;
+      const bus = this.bridge.wireBus.get(id);
+      if (bus) nets.push(...bus);
+    }
+    this.bridge.scopeResubscribe([...new Set(nets)]);
   }
 
   private watchLabel(id: number): string {
@@ -1558,6 +1574,9 @@ export class AppController {
     this.status = result.message;
     this.statusOk = result.ok;
     this.lastMutationAt = performance.now();
+    // Re-resolve watched wires to fresh net indices and re-subscribe the worker
+    // (net indices change across recompiles; history restarts from here).
+    this.syncScopeSubscription();
     this.dirtyStatic = true;
     this.dirtySignals = true;
     this.autosaveDraft();
