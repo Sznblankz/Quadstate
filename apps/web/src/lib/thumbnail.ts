@@ -17,9 +17,10 @@ import { PartLibrary } from "@logicsim/schema";
 /**
  * Render `json` (a project file) to a PNG data URL of `w`×`h` CSS px.
  * Returns null for empty/unparseable projects so callers can fall back to
- * the placeholder. `dpr` oversamples for crisp thumbnails on HiDPI.
+ * the placeholder. `dpr` oversamples so the image stays crisp both on HiDPI
+ * cards and while the Home→Editor portal zooms it up to the canvas region.
  */
-export function renderThumbnail(json: string, w: number, h: number, dpr = 2): string | null {
+export function renderThumbnail(json: string, w: number, h: number, dpr = 3): string | null {
   try {
     const lib = new PartLibrary();
     const { doc } = projectFromJson(json, lib);

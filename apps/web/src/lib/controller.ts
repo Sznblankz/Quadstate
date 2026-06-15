@@ -139,6 +139,8 @@ export class AppController {
   private chipCounter = 0;
   private lastMutationAt = 0;
   private viewAnim: number | null = null;
+  /** Fit the loaded content to the canvas once it attaches (Home→Editor open). */
+  private pendingFit = false;
 
   private readonly ctx: ToolContext = {
     doc: this.doc,
@@ -290,6 +292,9 @@ export class AppController {
     const ro = new ResizeObserver(resize);
     ro.observe(container);
     resize();
+    // A freshly opened project fits to the canvas so the live view matches the
+    // card thumbnail the Home→Editor portal crossfades into.
+    if (this.pendingFit) { this.pendingFit = false; this.fitContentToView(); }
 
     this.bridge.onSnapshot = () => {
       this.dirtySignals = true;
@@ -945,6 +950,34 @@ export class AppController {
     }, DUR + 100);
   }
 
+  /** Frame all content in the canvas instantly (used on project open so the
+   *  live view matches the thumbnail the Home→Editor portal lands on). */
+  fitContentToView(): void {
+    if (this.width === 0 || this.height === 0) return;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const comp of this.doc.components.values()) {
+      const b = componentBounds(comp, this.lib);
+      x0 = Math.min(x0, b.x0); y0 = Math.min(y0, b.y0);
+      x1 = Math.max(x1, b.x1); y1 = Math.max(y1, b.y1);
+    }
+    for (const wire of this.doc.wires.values()) {
+      const b = wireBounds(this.doc, this.lib, wire.id);
+      if (!b) continue;
+      x0 = Math.min(x0, b.x0); y0 = Math.min(y0, b.y0);
+      x1 = Math.max(x1, b.x1); y1 = Math.max(y1, b.y1);
+    }
+    if (!Number.isFinite(x0)) return; // empty project: keep the default view
+    const margin = 80;
+    const w = x1 - x0 + margin;
+    const h = y1 - y0 + margin;
+    const zoom = Math.min(1.6, Math.max(0.1, Math.min(this.width / w, this.height / h)));
+    this.viewport.zoom = zoom;
+    this.viewport.x = x0 - (this.width / zoom - (x1 - x0)) / 2;
+    this.viewport.y = y0 - (this.height / zoom - (y1 - y0)) / 2;
+    this.dirtyStatic = true;
+    this.dirtySignals = true;
+  }
+
   private animateToFit(b: { x0: number; y0: number; x1: number; y1: number }): void {
     const margin = 80;
     const w = b.x1 - b.x0 + margin;
@@ -1105,7 +1138,16 @@ export class AppController {
     this.projectName = d.name;
     this.watches = [];
     this.whyWireId = null;
-    return this.loadProjectString(d.json) === null;
+    const ok = this.loadProjectString(d.json) === null;
+    if (ok) this.fitOnOpen();
+    return ok;
+  }
+
+  /** Fit the freshly loaded project to the canvas — now if the editor is
+   *  already attached, otherwise once it attaches (the common Home→Editor case). */
+  private fitOnOpen(): void {
+    if (this.width > 0 && this.height > 0) this.fitContentToView();
+    else this.pendingFit = true;
   }
 
   // ----------------------------------------------------------- P2: watches
@@ -1287,6 +1329,7 @@ export class AppController {
     this.recompile();
     this.bridge.setRunning(true);
     this.flushDraft();
+    this.fitOnOpen();
     this.dirtyStatic = true;
     this.dirtySignals = true;
     this.pushUi();

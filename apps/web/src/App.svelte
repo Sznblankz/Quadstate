@@ -32,38 +32,45 @@
   function goNew() { ctrl.startNewProject(); view = "editor"; }
   function openTemplate(id: TemplateId) { ctrl.openTemplate(id); view = "editor"; }
 
-  // --- Home → Editor portal: the clicked thumbnail zooms to fill the screen,
-  //     then fades to reveal the live editor mounted underneath.
-  let portal = $state<{ tx: number; ty: number; sx: number; sy: number; thumb: string | null } | null>(null);
+  // --- Home → Editor portal: the editor mounts immediately (its canvas fit to
+  //     the loaded circuit), and the clicked card preview expands into the
+  //     canvas region and crossfades into the LIVE canvas — a portal into the
+  //     project, not a zoom of a dead image.
+  let portal = $state<{ x: number; y: number; w: number; h: number; thumb: string | null } | null>(null);
   function openRecent(id: string, origin?: DOMRect, thumb?: string | null) {
-    if (!ctrl.openProjectDraft(id)) return; // load the project (no canvas yet)
+    if (!ctrl.openProjectDraft(id)) return; // preload + fit the project (no canvas yet)
     if (reduceMotion || !origin) { view = "editor"; return; }
-    // Zoom the thumbnail out of its card to fill the screen (visual = the
-    // `portalZoom` Web Animation), then swap the editor in behind the opaque
-    // fullscreen portal and fade it away. State progression runs on timers, not
-    // animation events, so it can never hang if a frame callback is throttled.
-    portal = {
-      tx: origin.left, ty: origin.top,
-      sx: origin.width / window.innerWidth, sy: origin.height / window.innerHeight,
-      thumb: thumb ?? null,
-    };
-    setTimeout(() => { view = "editor"; }, 560);   // mount editor behind fullscreen portal
-    setTimeout(() => { portal = null; }, 980);      // fade done → reveal live editor
+    portal = { x: origin.left, y: origin.top, w: origin.width, h: origin.height, thumb: thumb ?? null };
+    view = "editor";                              // live editor mounts behind the portal
+    setTimeout(() => { portal = null; }, 760);    // crossfade done → fully live editor
   }
 
-  /** Action: the portal's visual — zoom from the card rect to fullscreen, then
-   *  fade. Driven by Web Animations (GPU-smooth); `openRecent`'s timers own the
-   *  actual view swap and teardown. */
-  function portalZoom(node: HTMLElement, p: { tx: number; ty: number; sx: number; sy: number }) {
+  /** Action: expand the card preview from its rect into the editor's canvas
+   *  region, crossfading to the live canvas mid-zoom. Web-Animation driven
+   *  (GPU-smooth); `openRecent`'s timer owns teardown so it can't hang. */
+  function portalZoom(node: HTMLElement, p: { x: number; y: number; w: number; h: number }) {
+    const main = document.querySelector(".app main");
+    const m = main ? main.getBoundingClientRect()
+      : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight } as DOMRect;
+    // Size/position the portal to the canvas region; map it onto the card to start.
+    node.style.left = `${m.left}px`;
+    node.style.top = `${m.top}px`;
+    node.style.width = `${m.width}px`;
+    node.style.height = `${m.height}px`;
+    const sx = m.width ? p.w / m.width : 1;
+    const sy = m.height ? p.h / m.height : 1;
+    const tx = p.x - m.left, ty = p.y - m.top;
     const expand = node.animate(
       [
-        { transform: `translate(${p.tx}px, ${p.ty}px) scale(${p.sx}, ${p.sy})`, borderRadius: "14px" },
+        { transform: `translate(${tx}px, ${ty}px) scale(${sx}, ${sy})`, borderRadius: "12px" },
         { transform: "translate(0px, 0px) scale(1, 1)", borderRadius: "0px" },
       ],
-      { duration: 520, easing: "cubic-bezier(.5,.08,.18,1)", fill: "forwards" },
+      { duration: 460, easing: "cubic-bezier(.5,.08,.18,1)", fill: "forwards" },
     );
+    // Crossfade DURING the zoom: the live canvas (already rendering, fit to the
+    // circuit) shows through as the preview grows — no hard image→editor cut.
     const fade = node.animate([{ opacity: 1 }, { opacity: 0 }],
-      { duration: 300, delay: 620, easing: "ease", fill: "forwards" });
+      { duration: 280, delay: 240, easing: "ease-in", fill: "forwards" });
     return { destroy() { expand.cancel(); fade.cancel(); } };
   }
 
@@ -519,17 +526,16 @@
     border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 12px;
   }
 
-  /* Home → Editor portal: starts over the clicked thumbnail, grows to fill the
-     screen, then fades to reveal the live editor mounted underneath. */
   .splash-wrap { position: fixed; inset: 0; z-index: 200; transition: opacity .4s ease; }
   .splash-wrap.fade { opacity: 0; pointer-events: none; }
-  /* portalZoom (Web Animations) drives the transform from the card rect to
-     fullscreen, then fades; transform-origin top-left matches the keyframes. */
+  /* Home → Editor portal: the editor mounts live underneath; this preview is
+     sized/positioned (imperatively) to the canvas region, expands from the
+     clicked card via portalZoom, and crossfades into the real canvas. */
   .portal {
-    position: fixed; inset: 0; z-index: 150;
+    position: fixed; z-index: 150;
     transform-origin: top left;
     background: var(--bg); overflow: hidden;
-    box-shadow: 0 30px 90px rgba(0,0,0,0.55);
+    box-shadow: 0 24px 80px rgba(0,0,0,0.5);
     will-change: transform, opacity;
   }
   .portal img { width: 100%; height: 100%; object-fit: cover; display: block; }
