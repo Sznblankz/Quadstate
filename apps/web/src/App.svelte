@@ -5,14 +5,35 @@
   import HomeView from "./lib/HomeView.svelte";
   import BrandMark from "./lib/BrandMark.svelte";
   import Splash from "./lib/Splash.svelte";
+  import AccountMenu from "./lib/AccountMenu.svelte";
+  import Settings from "./lib/Settings.svelte";
   import { AppController, type UiState } from "./lib/controller.js";
   import { listProjects, deleteProjectDraft, renameProjectDraft, type ProjectMeta } from "./lib/draft.js";
   import { type TemplateId } from "./lib/templates.js";
+  import { settings, applyReducedMotion, reduceMotionActive } from "./lib/settings.svelte.js";
 
   const ctrl = new AppController();
 
-  const reduceMotion = typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  // Settings overlay (shared across Home + editor).
+  applyReducedMotion(); // mirror the saved choice onto <html> before first paint
+  let settingsOpen = $state(false);
+  let settingsSection = $state<"account" | undefined>(undefined);
+  function openSettings(section?: "account") { settingsSection = section; settingsOpen = true; }
+  function closeSettings() { settingsOpen = false; }
+
+  // Push user prefs into the controller; re-runs whenever any of them change.
+  $effect(() => {
+    ctrl.setShowGrid(settings.showGrid);
+    ctrl.setSnap(settings.snap);
+    ctrl.setWheelMode(settings.wheelMode);
+    ctrl.setSpaceMode(settings.spaceMode);
+    ctrl.setDefaultBusWidth(settings.defaultBusWidth);
+    ctrl.setStartLive(settings.startLive);
+  });
+
+  // Effective reduced motion = in-app toggle OR the OS preference. Gates the
+  // JS-driven Home→Editor portal (CSS animations are handled by the global rule).
+  const reduceMotion = $derived(reduceMotionActive());
 
   // Startup splash plays once per load; Home/editor mount underneath after.
   // `booted` reveals Home (and fades the splash out); `splashGone` then
@@ -148,7 +169,13 @@
   }
   const toHex = (v: number) => "0x" + v.toString(16).toUpperCase();
 
-  let speed = $state(2000);
+  // Live transport speed; seeded from the saved default and re-seeded whenever
+  // the default changes in Settings (dragging the slider only changes `speed`).
+  let speed = $state(settings.defaultSpeed);
+  $effect(() => {
+    speed = settings.defaultSpeed;
+    ctrl.setSpeed(settings.defaultSpeed);
+  });
   function onSpeed(e: Event) {
     speed = Number((e.target as HTMLInputElement).value);
     ctrl.setSpeed(speed);
@@ -167,7 +194,7 @@
 {#if booted}
 {#if view === "home"}
   <HomeView {recents} onNew={goNew} onOpen={openRecent} onTemplate={openTemplate}
-    onRename={renameProject} onDelete={deleteProject} />
+    onRename={renameProject} onDelete={deleteProject} onOpenSettings={openSettings} />
 {:else}
 <div class="app" style={tokenStyle}>
   <header>
@@ -223,6 +250,10 @@
     <div class="seg">
       <button disabled={ui.editing != null} onclick={() => ctrl.saveProject()}>Save</button>
       <button disabled={ui.editing != null} onclick={() => ctrl.openProject()}>Open</button>
+    </div>
+
+    <div class="seg account-seg">
+      <AccountMenu onOpenSettings={openSettings} />
     </div>
   </header>
 
@@ -361,6 +392,12 @@
   </div>
 </div>
 {/if}
+{/if}
+
+{#if settingsOpen}
+  <div style={tokenStyle}>
+    <Settings initialSection={settingsSection ?? "appearance"} onClose={closeSettings} />
+  </div>
 {/if}
 
 {#if portal}

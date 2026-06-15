@@ -34,6 +34,8 @@ export interface RenderState {
   height: number;
   /** Device pixel ratio; render functions own the full transform. */
   dpr: number;
+  /** Draw the background grid dots (Settings → Canvas). Defaults to on. */
+  showGrid?: boolean;
 }
 
 // Re-skinned to the approved QuadState tokens (VISUAL_SYSTEM_SUMMARY §1).
@@ -81,7 +83,7 @@ export function renderSchematic(ctx: CanvasRenderingContext2D, s: RenderState): 
   ctx.fillRect(0, 0, s.width, s.height);
 
   applyView(ctx, s);
-  drawGridDots(ctx, s);
+  if (s.showGrid !== false) drawGridDots(ctx, s);
 
   const ids = visibleIds(s);
 

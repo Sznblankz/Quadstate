@@ -90,13 +90,15 @@ export function stampOrigin(
   lib: PartLibrary,
   wx: number,
   wy: number,
+  snap = true,
 ): { x: number; y: number } {
   const probe: Component = { id: -1, part, x: 0, y: 0, rot: 0, props: {} };
   const geom = componentGeom(probe, layoutInterface(part, lib));
-  return {
-    x: Math.round((wx - geom.w / 2) / SNAP) * SNAP,
-    y: Math.round((wy - geom.h / 2) / SNAP) * SNAP,
-  };
+  const x = wx - geom.w / 2;
+  const y = wy - geom.h / 2;
+  return snap
+    ? { x: Math.round(x / SNAP) * SNAP, y: Math.round(y / SNAP) * SNAP }
+    : { x, y };
 }
 
 export type HitResult =

@@ -7,6 +7,17 @@
     <style>
       html, body, #app { margin: 0; height: 100%; overflow: hidden; }
       body { background: #0b0f14; color: #c7d2de; font: 13px system-ui, sans-serif; }
+      /* Settings → Reduce motion: neutralise animations/transitions app-wide.
+         The OS prefers-reduced-motion is handled by per-component @media rules;
+         this honours the in-app toggle (set on <html> by settings.svelte.ts). */
+      html[data-reduced-motion="1"] *,
+      html[data-reduced-motion="1"] *::before,
+      html[data-reduced-motion="1"] *::after {
+        animation-duration: 0.001ms !important;
+        animation-delay: 0ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+      }
     </style>
   </head>
   <body>

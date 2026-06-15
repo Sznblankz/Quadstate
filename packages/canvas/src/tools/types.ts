@@ -36,6 +36,9 @@ export interface ToolContext {
   /** Document structure changed -> recompile + re-elaborate. */
   structureChanged(): void;
   requestRender(): void;
+  /** Whether component placement/movement snaps to the grid (Settings). When
+   *  false, positions land exactly under the cursor. Defaults to snapping. */
+  snap?: boolean;
 }
 
 export interface Tool {

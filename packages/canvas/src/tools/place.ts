@@ -24,7 +24,7 @@ export class PlaceTool implements Tool {
     if (this.part === "builtin:clock") props.halfPeriod = 50;
     if (this.part === "builtin:dff") props.init = 0;
 
-    const origin = stampOrigin(this.part, ctx.lib, i.wx, i.wy);
+    const origin = stampOrigin(this.part, ctx.lib, i.wx, i.wy, ctx.snap !== false);
     const cmd = addComponent(ctx.doc, {
       part: this.part,
       x: origin.x,

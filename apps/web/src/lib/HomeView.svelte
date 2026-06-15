@@ -1,11 +1,12 @@
 <script lang="ts">
   import { TOKENS } from "@logicsim/canvas";
   import BrandMark from "./BrandMark.svelte";
+  import AccountMenu from "./AccountMenu.svelte";
   import { loadProjectDraft, type ProjectMeta } from "./draft.js";
   import { renderThumbnail } from "./thumbnail.js";
   import { TEMPLATES, type TemplateId } from "./templates.js";
 
-  let { recents, onNew, onOpen, onTemplate, onRename, onDelete }: {
+  let { recents, onNew, onOpen, onTemplate, onRename, onDelete, onOpenSettings }: {
     recents: ProjectMeta[];
     onNew: () => void;
     /** Opens a project; `origin`/`thumb` seed the zoom-portal transition. */
@@ -13,6 +14,7 @@
     onTemplate: (id: TemplateId) => void;
     onRename: (id: string, name: string) => void;
     onDelete: (id: string) => void;
+    onOpenSettings: (section?: "account") => void;
   } = $props();
 
   const tokenStyle = Object.entries(TOKENS).map(([k, v]) => `--${k}: ${v}`).join(";");
@@ -82,6 +84,8 @@
       <BrandMark size={15} />
       QuadState
     </span>
+    <span class="spacer"></span>
+    <AccountMenu onOpenSettings={onOpenSettings} />
   </header>
 
   <div class="content">
@@ -192,8 +196,9 @@
 
 <style>
   .home { height: 100%; background: var(--bg); color: var(--text1); font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden; }
-  header { height: 56px; flex: 0 0 auto; display: flex; align-items: center; padding: 0 28px; border-bottom: 1px solid var(--hairline); }
+  header { height: 56px; flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 0 28px; border-bottom: 1px solid var(--hairline); }
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; }
+  .spacer { flex: 1 1 auto; }
 
   .content { flex: 1; min-height: 0; display: flex; gap: 24px; padding: 24px 28px; }
   .left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 20px; }

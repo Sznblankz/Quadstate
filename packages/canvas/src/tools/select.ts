@@ -3,6 +3,11 @@ import { SNAP } from "../symbols.js";
 import type { Intent } from "../input/types.js";
 import type { Tool, ToolContext } from "./types.js";
 
+/** Round a world delta to the grid, unless snapping is disabled (Settings). */
+function snapTo(v: number, ctx: ToolContext): number {
+  return ctx.snap === false ? v : Math.round(v / SNAP) * SNAP;
+}
+
 /**
  * Select tool: tap selects (shift toggles), drag on a component moves the
  * selection (ghost preview, single undoable command on release, snapped),
@@ -44,8 +49,8 @@ export class SelectTool implements Tool {
           this.moving.dy += i.dwy;
           ctx.overlay.dragGhost = {
             ids: this.moving.ids,
-            dx: Math.round(this.moving.dx / SNAP) * SNAP,
-            dy: Math.round(this.moving.dy / SNAP) * SNAP,
+            dx: snapTo(this.moving.dx, ctx),
+            dy: snapTo(this.moving.dy, ctx),
           };
         } else if (this.marqueeStart) {
           ctx.overlay.marquee = {
@@ -60,8 +65,8 @@ export class SelectTool implements Tool {
       }
       case "dragEnd": {
         if (this.moving) {
-          const dx = Math.round(this.moving.dx / SNAP) * SNAP;
-          const dy = Math.round(this.moving.dy / SNAP) * SNAP;
+          const dx = snapTo(this.moving.dx, ctx);
+          const dy = snapTo(this.moving.dy, ctx);
           if (dx !== 0 || dy !== 0) {
             ctx.history.execute(ctx.doc, moveComponents(this.moving.ids, dx, dy), ctx.selection);
             ctx.structureChanged(); // geometry feeds wires; nets unchanged but bounds move

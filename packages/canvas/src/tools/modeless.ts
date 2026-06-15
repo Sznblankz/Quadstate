@@ -6,6 +6,11 @@ import type { Tool, ToolContext } from "./types.js";
 
 type PortHit = Extract<NonNullable<HitResult>, { type: "port" }>;
 
+/** Round a world delta to the grid, unless snapping is disabled (Settings). */
+function snapTo(v: number, ctx: ToolContext): number {
+  return ctx.snap === false ? v : Math.round(v / SNAP) * SNAP;
+}
+
 /**
  * Modeless default tool — "the target decides", so there is no Select / Wire /
  * Poke switching. One resting state; the gesture's meaning comes from what it
@@ -110,8 +115,8 @@ export class ModelessTool implements Tool {
       this.moving.dy += i.dwy;
       ctx.overlay.dragGhost = {
         ids: this.moving.ids,
-        dx: Math.round(this.moving.dx / SNAP) * SNAP,
-        dy: Math.round(this.moving.dy / SNAP) * SNAP,
+        dx: snapTo(this.moving.dx, ctx),
+        dy: snapTo(this.moving.dy, ctx),
       };
     } else if (this.marqueeStart) {
       ctx.overlay.marquee = {
@@ -136,8 +141,8 @@ export class ModelessTool implements Tool {
         ctx.structureChanged();
       }
     } else if (this.moving) {
-      const dx = Math.round(this.moving.dx / SNAP) * SNAP;
-      const dy = Math.round(this.moving.dy / SNAP) * SNAP;
+      const dx = snapTo(this.moving.dx, ctx);
+      const dy = snapTo(this.moving.dy, ctx);
       if (dx !== 0 || dy !== 0) {
         ctx.history.execute(ctx.doc, moveComponents(this.moving.ids, dx, dy), ctx.selection);
         ctx.structureChanged();

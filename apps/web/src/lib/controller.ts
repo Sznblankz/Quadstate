@@ -106,6 +106,13 @@ export class AppController {
   private userParts: Array<{ id: string; name: string }> = [];
   private storage: StorageProvider | null = null;
 
+  // ---- user preferences (Settings overlay; pushed in from the shell) ----
+  private showGrid = true;
+  private wheelMode: "zoom" | "pan" = "zoom";
+  private spaceMode: "playPan" | "transport" = "playPan";
+  private startLive = false;
+  private defaultBusWidth = 1;
+
   private readonly contract = new ContractTool(this.logger);
   // The default editor rests in one modeless tool ("the target decides") — no
   // Select/Wire/Poke switching. The ?proto=1 harness keeps the richer
@@ -160,7 +167,23 @@ export class AppController {
     poke: (componentId, value) => this.bridge.poke(componentId, value),
     structureChanged: () => this.recompile(),
     requestRender: () => { this.dirtyStatic = true; },
+    snap: true,
   };
+
+  // ----------------------------------------------------- Settings: prefs
+  setShowGrid(on: boolean): void { this.showGrid = on; this.dirtyStatic = true; }
+  setSnap(on: boolean): void { this.ctx.snap = on; }
+  setWheelMode(mode: "zoom" | "pan"): void { this.wheelMode = mode; }
+  setSpaceMode(mode: "playPan" | "transport"): void { this.spaceMode = mode; }
+  setStartLive(on: boolean): void { this.startLive = on; }
+  setDefaultBusWidth(width: number): void {
+    this.defaultBusWidth = Math.max(1, Math.min(AppController.MAX_WIDTH, Math.round(width) || 1));
+  }
+
+  /** Extra props for a fresh stamp: a wider default bus for new IO pins. */
+  private placeExtra(part: string): Record<string, number | string> {
+    return isIo(part) && this.defaultBusWidth > 1 ? { width: this.defaultBusWidth } : {};
+  }
 
   attach(container: HTMLElement): void {
     // The canvas remounts whenever the editor is re-entered (e.g. switching
@@ -214,7 +237,9 @@ export class AppController {
       // Space-hold grip: the pointer belongs to panning, not the tools.
       // Grabbing the canvas counts as pan intent even before any movement
       // (otherwise a zero-move space-click would read as a transport tap).
-      if (this.proto && this.spaceHeld && e.button === 0) {
+      // spaceHeld is only ever set in a hold-pan-capable mode (proto, or the
+      // default editor's "playPan" spacebar), so the flag alone is the gate.
+      if (this.spaceHeld && e.button === 0) {
         const rect = container.getBoundingClientRect();
         this.spaceLast = { sx: e.clientX - rect.left, sy: e.clientY - rect.top };
         this.spacePanned = true;
@@ -231,7 +256,7 @@ export class AppController {
       const sy = e.clientY - rect.top;
       // Space-hold + drag = pan, even mid-gesture (the recognizer's drag
       // freezes while moves are intercepted and resumes on release).
-      if (this.proto && this.spaceHeld && e.buttons > 0) {
+      if (this.spaceHeld && e.buttons > 0) {
         if (this.spaceLast) {
           // Grab-the-paper (content follows the cursor), matching dispatch pan.
           this.viewport.panByScreen(sx - this.spaceLast.sx, sy - this.spaceLast.sy);
@@ -273,7 +298,18 @@ export class AppController {
     container.addEventListener("wheel", (e) => {
       e.preventDefault();
       const rect = container.getBoundingClientRect();
-      recognizer.wheel({ sx: e.clientX - rect.left, sy: e.clientY - rect.top, deltaY: e.deltaY });
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      // Ctrl/pinch always zooms (trackpad pinch arrives as ctrl+wheel), even in
+      // pan mode. Otherwise the wheel follows the user's chosen behaviour.
+      if (this.wheelMode === "pan" && !e.ctrlKey) {
+        // Scroll-to-pan: content follows the scroll direction (grab-the-paper).
+        this.viewport.panByScreen(-e.deltaX, -e.deltaY);
+        this.dirtyStatic = true;
+        this.dirtySignals = true;
+      } else {
+        recognizer.wheel({ sx, sy, deltaY: e.deltaY });
+      }
     }, { passive: false, signal });
 
     window.addEventListener("keydown", (e) => this.key(e), { signal });
@@ -388,6 +424,24 @@ export class AppController {
       e.preventDefault();
       return;
     }
+    if (e.key === " ") {
+      // Default-editor spacebar (proto handles its own above). "transport":
+      // tap toggles run/pause. "playPan": tap toggles, hold pans (resolved on
+      // keyup; the pointer handlers pan while spaceHeld). Suppressed while
+      // editing a blueprint (run has no meaning there).
+      e.preventDefault();
+      if (!this.editing) {
+        if (this.spaceMode === "transport") {
+          if (!e.repeat) this.toggleRunning();
+        } else if (!e.repeat && !this.spaceHeld) {
+          this.spaceHeld = true;
+          this.spaceDownT = performance.now();
+          this.spacePanned = false;
+          this.spaceLast = null;
+        }
+      }
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
       this.undo();
       e.preventDefault();
@@ -468,7 +522,9 @@ export class AppController {
   }
 
   private keyUp(e: KeyboardEvent): void {
-    if (!this.proto || e.key !== " " || !this.spaceHeld) return;
+    // spaceHeld is only set in a hold-pan mode (proto or the default editor's
+    // "playPan"); a quick tap with no pan resolves to a transport toggle.
+    if (e.key !== " " || !this.spaceHeld) return;
     this.spaceHeld = false;
     this.spaceLast = null;
     const durationMs = Math.round(performance.now() - this.spaceDownT);
@@ -477,7 +533,9 @@ export class AppController {
       this.toggleRunning();
       toggled = true;
     }
-    this.logger.space({ t: Math.round(performance.now()), durationMs, panned: this.spacePanned, toggled });
+    if (this.proto) {
+      this.logger.space({ t: Math.round(performance.now()), durationMs, panned: this.spacePanned, toggled });
+    }
   }
 
   /**
@@ -513,7 +571,7 @@ export class AppController {
       return;
     }
     this.active.deactivate?.(this.ctx);
-    this.place = new PlaceTool(part);
+    this.place = new PlaceTool(part, this.placeExtra(part));
     this.placePart = part;
     this.active = this.place;
     this.pushUi();
@@ -569,7 +627,7 @@ export class AppController {
       const w = overCanvas(ev);
       if (w) {
         // One-shot placement via the place tool's tap path (io naming etc.).
-        new PlaceTool(part).intent(
+        new PlaceTool(part, this.placeExtra(part)).intent(
           { type: "tap", wx: w.wx, wy: w.wy, target: null, shift: false }, this.ctx);
         this.logger.log("paletteDrop", { part });
       } else {
@@ -1132,6 +1190,7 @@ export class AppController {
     this.flushDraft();
     this.projectId = newProjectId();
     this.newProject("Untitled circuit");
+    this.bridge.setRunning(this.startLive); // Settings → Start live on open
     this.flushDraft(); // register in recents right away
   }
 
@@ -1145,7 +1204,10 @@ export class AppController {
     this.watches = [];
     this.whyWireId = null;
     const ok = this.loadProjectString(d.json) === null;
-    if (ok) this.fitOnOpen();
+    if (ok) {
+      this.fitOnOpen();
+      this.bridge.setRunning(this.startLive); // Settings → Start live on open
+    }
     return ok;
   }
 
@@ -1335,7 +1397,7 @@ export class AppController {
     buildTemplate(id, this.doc, this.history, this.selection, libId);
     this.selection.clear();
     this.recompile();
-    this.bridge.setRunning(true);
+    this.bridge.setRunning(this.startLive); // Settings → Start live on open
     this.flushDraft();
     this.fitOnOpen();
     this.dirtyStatic = true;
@@ -1520,6 +1582,7 @@ export class AppController {
         width: this.width,
         height: this.height,
         dpr: this.dpr,
+        showGrid: this.showGrid,
       };
     }
     return {
@@ -1536,6 +1599,7 @@ export class AppController {
       width: this.width,
       height: this.height,
       dpr: this.dpr,
+      showGrid: this.showGrid,
     };
   }
 
