@@ -90,10 +90,6 @@ export class AppController {
   /** Default-editor Ctrl+G: the shell handles naming (prompt) then calls
    *  createChip. Proto mode uses createChipProto (inline rename) instead. */
   onRequestCreateChip?: () => void;
-  /** Fires once the canvas is attached and the view is fit — after the canvas
-   *  has been measured at full size. The Home→Editor portal uses this to start
-   *  the shared-element expand on the real (full-size) canvas. */
-  onAttached?: () => void;
 
   private stack: CanvasStack | null = null;
   private container: HTMLElement | null = null;
@@ -292,13 +288,19 @@ export class AppController {
       this.stack?.resize(this.width, this.height, this.dpr);
       this.dirtyStatic = true;
       this.dirtySignals = true;
+      // Fit a freshly opened project ONLY once the canvas has real dimensions.
+      // The editor may not be laid out yet at attach time (width/height 0), so
+      // this also runs on the first ResizeObserver callback that reports a
+      // non-zero size — never fitting against a 0×0 canvas (which would leave
+      // the circuit stranded at the default top-left viewport).
+      if (this.pendingFit && this.width > 0 && this.height > 0) {
+        this.pendingFit = false;
+        this.fitContentToView();
+      }
     };
     const ro = new ResizeObserver(resize);
     ro.observe(container);
     resize();
-    // A freshly opened project fits to the canvas so the live view matches the
-    // card thumbnail the Home→Editor portal crossfades into.
-    if (this.pendingFit) { this.pendingFit = false; this.fitContentToView(); }
 
     this.bridge.onSnapshot = () => {
       this.dirtySignals = true;
@@ -319,9 +321,6 @@ export class AppController {
       this.teardown = null;
     };
     this.pushUi();
-    // Canvas is measured at full size and the view is fit — safe for the shell
-    // to run the Home→Editor expand on the live canvas.
-    this.onAttached?.();
   }
 
   private dispatch(intent: Intent): void {
@@ -1150,11 +1149,13 @@ export class AppController {
     return ok;
   }
 
-  /** Fit the freshly loaded project to the canvas — now if the editor is
-   *  already attached, otherwise once it attaches (the common Home→Editor case). */
+  /** Request a fit-to-view for a freshly opened project. openProjectDraft /
+   *  openTemplate are always Home→Editor, so the canvas re-mounts; the fit is
+   *  deferred to attach's ResizeObserver-backed resize(), which runs it once
+   *  the canvas reports REAL (non-zero) dimensions — never against a stale or
+   *  0×0 size (which left the circuit stranded in the top-left corner). */
   private fitOnOpen(): void {
-    if (this.width > 0 && this.height > 0) this.fitContentToView();
-    else this.pendingFit = true;
+    this.pendingFit = true;
   }
 
   // ----------------------------------------------------------- P2: watches
