@@ -143,8 +143,17 @@
                     </div>
                   {:else if renamingId !== p.id}
                     <div class="card-actions">
-                      <button class="card-act" title="Rename" onclick={() => startRename(p)}>Rename</button>
-                      <button class="card-act danger" title="Delete" onclick={() => confirmId = p.id}>Delete</button>
+                      <button class="card-act" title="Rename" aria-label="Rename project" onclick={() => startRename(p)}>
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M11.6 2.4a1.4 1.4 0 0 1 2 2L5.3 12.7l-2.8.8.8-2.8 8.3-8.3z" />
+                          <path d="M10.6 3.4l2 2" />
+                        </svg>
+                      </button>
+                      <button class="card-act danger" title="Delete" aria-label="Delete project" onclick={() => confirmId = p.id}>
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M3 4.5h10M6.5 4.5V3.2h3v1.3M11 4.5l-.5 8a1 1 0 0 1-1 .95H6.5a1 1 0 0 1-1-.95l-.5-8" />
+                        </svg>
+                      </button>
                     </div>
                   {/if}
                 </div>
@@ -244,7 +253,9 @@
   /* Hover actions — quiet, appear only on hover, never loud. */
   .card-actions { position: absolute; right: 8px; bottom: 8px; z-index: 3; display: flex; gap: 5px; opacity: 0; transform: translateY(3px); transition: opacity .15s ease, transform .15s ease; pointer-events: none; }
   .card:hover .card-actions, .card:focus-within .card-actions { opacity: 1; transform: none; pointer-events: auto; }
-  .card-act { background: rgba(13,15,20,0.82); backdrop-filter: blur(4px); color: var(--text2); border: 1px solid var(--hairline); border-radius: 7px; padding: 3px 9px; font: inherit; font-size: 11px; cursor: pointer; transition: background .14s ease, color .14s ease, border-color .14s ease; }
+  /* Small square icon buttons (pencil / trash) — quiet, hover-only. */
+  .card-act { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; background: rgba(13,15,20,0.82); backdrop-filter: blur(4px); color: var(--text2); border: 1px solid var(--hairline); border-radius: 7px; cursor: pointer; transition: background .14s ease, color .14s ease, border-color .14s ease; }
+  .card-act svg { width: 15px; height: 15px; }
   .card-act:hover { background: var(--surface3); color: var(--text1); border-color: var(--hairlineStrong); }
   .card-act.danger:hover { color: var(--sigX); border-color: rgba(232,85,78,0.5); }
 

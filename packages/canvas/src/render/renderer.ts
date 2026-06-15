@@ -2,7 +2,7 @@ import { HI, LO, X, Z } from "@logicsim/engine";
 import type { CircuitDocument, EntityId, InkStroke, Selection } from "@logicsim/document";
 import type { PartLibrary } from "@logicsim/schema";
 import { MIXED, aggregateBus } from "../bus.js";
-import { ICONIC_GATES, componentGeom, isIo, layoutInterface, wireSegments } from "../symbols.js";
+import { ICONIC_GATES, componentGeom, isIo, layoutInterface, wireJunctions, wireSegments } from "../symbols.js";
 import type { SpatialGrid } from "../grid.js";
 import type { Viewport } from "../transform.js";
 import type { OverlayState } from "../tools/types.js";
@@ -102,6 +102,16 @@ export function renderSchematic(ctx: CanvasRenderingContext2D, s: RenderState): 
   for (const id of ids) {
     const comp = s.doc.components.get(id);
     if (comp) drawComponent(ctx, s, comp.id);
+  }
+
+  // Junction dots — same node language as component pins (COLORS.port), drawn
+  // where a net branches so an intentional connection reads differently from a
+  // mere crossing (crossings share no pin, so they get no dot).
+  ctx.fillStyle = COLORS.port;
+  for (const j of wireJunctions(s.doc, s.lib)) {
+    ctx.beginPath();
+    ctx.arc(j.x, j.y, 4, 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
@@ -450,8 +460,13 @@ export function renderOverlay(ctx: CanvasRenderingContext2D, s: RenderState): vo
     ctx.strokeStyle = w.valid ? COLORS.signal[HI] : COLORS.wire;
     ctx.lineWidth = 2 / s.viewport.zoom + 0.5;
     ctx.setLineDash(w.valid ? [] : [5, 4]);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     ctx.beginPath();
+    // Orthogonal L preview (horizontal first, then vertical) so the preview
+    // matches how the committed wire routes.
     ctx.moveTo(w.x0, w.y0);
+    ctx.lineTo(w.x1, w.y0);
     ctx.lineTo(w.x1, w.y1);
     ctx.stroke();
     ctx.setLineDash([]);

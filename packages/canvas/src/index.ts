@@ -4,7 +4,7 @@ export { TOKENS, type Tokens } from "./tokens.js";
 export { MIXED, aggregateBus, busHex, busBin } from "./bus.js";
 export {
   SNAP, componentBounds, componentGeom, hitTest, isIo, layoutInterface,
-  portPosition, stampOrigin, wireBounds, wireSegments,
+  portPosition, stampOrigin, wireBounds, wireJunctions, wireSegments,
   type ComponentGeom, type HitResult, type PortGeom,
 } from "./symbols.js";
 export type { Intent, PointerInput, PointerKind, WheelInput } from "./input/types.js";

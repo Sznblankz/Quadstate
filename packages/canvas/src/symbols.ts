@@ -122,7 +122,12 @@ export function portPosition(
   return port ? { x: port.x, y: port.y } : null;
 }
 
-/** Hub-routed wire polyline: every port connects to the first port. */
+/**
+ * Hub-routed wire polyline: every port connects to the first port (the hub).
+ * Routing is ORTHOGONAL — each hub→port link is an L (horizontal from the hub
+ * to the target's x, then vertical to the target). Degenerate legs (already
+ * aligned) collapse, so an aligned pair is one straight segment. No diagonals.
+ */
 export function wireSegments(
   doc: CircuitDocument,
   lib: PartLibrary,
@@ -135,7 +140,43 @@ export function wireSegments(
     .filter((p): p is { x: number; y: number } => p !== null);
   if (pts.length < 2) return [];
   const hub = pts[0];
-  return pts.slice(1).map((p) => ({ x0: hub.x, y0: hub.y, x1: p.x, y1: p.y }));
+  const segs: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
+  for (const p of pts.slice(1)) {
+    const ex = p.x, ey = hub.y; // elbow: horizontal first, then vertical
+    if (hub.x !== ex) segs.push({ x0: hub.x, y0: hub.y, x1: ex, y1: ey });
+    if (ey !== p.y) segs.push({ x0: ex, y0: ey, x1: p.x, y1: p.y });
+  }
+  return segs;
+}
+
+/**
+ * Points where a net visibly branches — drawn as junction dots so an
+ * intentional connection (≥2 wire segments meeting at a shared pin, or a
+ * fan-out hub) reads differently from two wires merely crossing (which never
+ * share a pin endpoint, so they never get a dot).
+ */
+export function wireJunctions(
+  doc: CircuitDocument,
+  lib: PartLibrary,
+): Array<{ x: number; y: number }> {
+  const tally = new Map<string, { x: number; y: number; count: number }>();
+  const bump = (x: number, y: number, n: number): void => {
+    const k = `${Math.round(x)},${Math.round(y)}`;
+    const e = tally.get(k);
+    if (e) e.count += n;
+    else tally.set(k, { x, y, count: n });
+  };
+  for (const wire of doc.wires.values()) {
+    const pts = wire.ports
+      .map((p) => portPosition(doc, lib, p.component, p.pin))
+      .filter((p): p is { x: number; y: number } => p !== null);
+    if (pts.length < 2) continue;
+    bump(pts[0].x, pts[0].y, pts.length - 1); // segments emanating from the hub
+    for (const p of pts.slice(1)) bump(p.x, p.y, 1);
+  }
+  const out: Array<{ x: number; y: number }> = [];
+  for (const e of tally.values()) if (e.count >= 2) out.push({ x: e.x, y: e.y });
+  return out;
 }
 
 function distToSegment(

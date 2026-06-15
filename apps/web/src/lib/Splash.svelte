@@ -5,95 +5,95 @@
    *  parent then reveals Home; this overlay fades out over the handoff. */
   let { onDone }: { onDone: () => void } = $props();
 
-  let spinner = $state<HTMLDivElement>();
-  let logo = $state<HTMLDivElement>();
-  const digitEls: HTMLSpanElement[] = [];
-  function setDigit(node: HTMLSpanElement, i: number) { digitEls[i] = node; }
+  // Final logo pattern, read row-major:  0 1 / 1 0  (1 = accent, 0 = gray).
+  const FINAL = ["0", "1", "1", "0"];
+  // Reactive digit faces — flicker between 0/1 while centered, then settle.
+  let digits = $state(FINAL.map((d) => ({ char: d, on: d === "1" })));
 
-  // 0 1 / 1 0  → read row-major into a single file "0 1 1 0".
-  const DIGITS = [
-    { d: "0", on: false }, { d: "1", on: true },
-    { d: "1", on: true },  { d: "0", on: false },
-  ];
+  const els: HTMLSpanElement[] = [];
+  function setEl(node: HTMLSpanElement, i: number) { els[i] = node; }
 
-  const CELL = 60;            // big digit box (px)
+  const CELL = 56;
   const GAP = 16;
   const half = (CELL + GAP) / 2;
-  const ROW = CELL * 0.6;     // tight single-file spacing
-  // 2×2 resting position of each cell's centre, relative to the group centre.
+  // Resting 2×2 cell centres (relative to the group centre).
   const grid = [
     { x: -half, y: -half }, { x: half, y: -half },
     { x: -half, y: half },  { x: half, y: half },
   ];
-  // Collapsed single-file position (horizontal row), same group centre.
-  const row = DIGITS.map((_, i) => ({ x: (i - 1.5) * ROW, y: 0 }));
-
-  const EASE_OUT = "cubic-bezier(.22,.68,.16,1)";
-  const EASE_IO = "cubic-bezier(.62,0,.18,1)";
 
   onMount(() => {
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    els.forEach((el, i) => { el.style.transform = `translate(${grid[i].x}px, ${grid[i].y}px)`; });
 
-    // Resting transforms (also the fallback paint).
-    digitEls.forEach((el, i) => {
-      el.style.transform = `translate(${grid[i].x}px, ${grid[i].y}px)`;
-    });
-
-    if (reduce || !spinner || !logo || digitEls.length < 4) {
-      // Reduced motion: hold the static mark briefly, then hand off.
-      digitEls.forEach((el) => (el.style.opacity = "1"));
+    if (reduce || els.length < 4) {
+      // Reduced motion: static final logo, brief hold, then hand off — no
+      // flicker, no travel.
+      digits = FINAL.map((d) => ({ char: d, on: d === "1" }));
+      els.forEach((el) => (el.style.opacity = "1"));
       const t = setTimeout(onDone, 650);
       return () => clearTimeout(t);
     }
 
+    const timers: ReturnType<typeof setTimeout>[] = [];
     const anims: Animation[] = [];
-    const A = (el: Element, frames: Keyframe[], opts: KeyframeAnimationOptions) => {
-      const a = el.animate(frames, { fill: "forwards", ...opts });
-      anims.push(a);
-      return a;
-    };
+    const after = (ms: number, fn: () => void) => timers.push(setTimeout(fn, ms));
 
-    // 1) Pop-in — staggered scale/opacity at the 2×2 positions.
-    digitEls.forEach((el, i) => {
+    // 1) Pop-in at the centre, staggered.
+    els.forEach((el, i) => {
       const g = `translate(${grid[i].x}px, ${grid[i].y}px)`;
-      A(el, [
-        { opacity: 0, transform: `${g} scale(.35)` },
-        { opacity: 1, transform: `${g} scale(1)` },
-      ], { duration: 440, delay: i * 80, easing: EASE_OUT });
+      anims.push(el.animate(
+        [{ opacity: 0, transform: `${g} scale(.4)` }, { opacity: 1, transform: `${g} scale(1)` }],
+        { duration: 420, delay: i * 70, easing: "cubic-bezier(.22,.68,.16,1)", fill: "forwards" },
+      ));
     });
 
-    // 2) Spin + collapse — the group turns while digits slide into single file.
-    A(spinner, [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }],
-      { duration: 920, delay: 560, easing: EASE_IO });
-    digitEls.forEach((el, i) => {
-      A(el, [
-        { transform: `translate(${grid[i].x}px, ${grid[i].y}px) scale(1)` },
-        { transform: `translate(${row[i].x}px, ${row[i].y}px) scale(1)` },
-      ], { duration: 780, delay: 640, easing: EASE_IO });
+    // 2) Flicker — each digit toggles 0/1 a few times, then locks to FINAL[i]
+    //    (staggered lock = a gentle settle, not a strobe). setTimeout-driven so
+    //    it survives frame-callback throttling.
+    const flickStart = 480;
+    const lockBase = 1180;
+    for (let tick = 0; tick < 9; tick++) {
+      after(flickStart + tick * 90, () => {
+        digits = digits.map((d, i) =>
+          flickStart + tick * 90 >= lockBase + i * 70
+            ? { char: FINAL[i], on: FINAL[i] === "1" }
+            : (Math.random() < 0.5 ? { char: "0", on: false } : { char: "1", on: true }));
+      });
+    }
+    after(lockBase + 4 * 70, () => { digits = FINAL.map((d) => ({ char: d, on: d === "1" })); });
+
+    // 3) Travel — each digit moves INDIVIDUALLY (staggered) from its centre cell
+    //    to the matching cell of the small corner logo. No merge, no spin.
+    const scale = 0.25;
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const corner = { x: 44, y: 30 }; // ~ Home/editor chrome mark centre
+    const travelAt = 1620;
+    els.forEach((el, i) => {
+      const start = `translate(${grid[i].x}px, ${grid[i].y}px) scale(1)`;
+      const ex = corner.x - cx + grid[i].x * scale;
+      const ey = corner.y - cy + grid[i].y * scale;
+      const end = `translate(${ex}px, ${ey}px) scale(${scale})`;
+      after(travelAt, () => anims.push(el.animate(
+        [{ transform: start }, { transform: end }],
+        { duration: 620, delay: i * 55, easing: "cubic-bezier(.5,.06,.16,1)", fill: "forwards" },
+      )));
     });
 
-    // 3) Travel — the collapsed mark glides to the top-left chrome position.
-    const targetX = 44 - window.innerWidth / 2;
-    const targetY = 30 - window.innerHeight / 2;
-    const travel = A(logo, [
-      { transform: "translate(0,0) scale(1)" },
-      { transform: `translate(${targetX}px, ${targetY}px) scale(.26)` },
-    ], { duration: 660, delay: 1480, easing: "cubic-bezier(.5,0,.16,1)" });
-
-    travel.onfinish = () => onDone();
-    // Safety net if the tab is backgrounded and onfinish never fires.
-    const t = setTimeout(onDone, 2400);
-    return () => { clearTimeout(t); anims.forEach((a) => a.cancel()); };
+    // 4) Hand off (Home reveals + this overlay fades). Safety timer covers a
+    //    backgrounded tab where animations never advance.
+    after(2160, onDone);
+    after(2700, onDone);
+    return () => { timers.forEach(clearTimeout); anims.forEach((a) => a.cancel()); };
   });
 </script>
 
 <div class="splash" role="img" aria-label="QuadState">
-  <div class="logo" bind:this={logo}>
-    <div class="spinner" bind:this={spinner}>
-      {#each DIGITS as g, i}
-        <span class="digit" class:on={g.on} use:setDigit={i}>{g.d}</span>
-      {/each}
-    </div>
+  <div class="logo">
+    {#each digits as d, i}
+      <span class="digit" class:on={d.on} use:setEl={i}>{d.char}</span>
+    {/each}
   </div>
 </div>
 
@@ -104,7 +104,6 @@
     background: var(--bg);
   }
   .logo { position: relative; width: 0; height: 0; }
-  .spinner { position: absolute; left: 0; top: 0; transform-origin: center; }
   .digit {
     position: absolute; left: 0; top: 0;
     width: 60px; height: 60px; margin: -30px 0 0 -30px;
@@ -113,10 +112,11 @@
     font-weight: 600; font-variant-numeric: tabular-nums;
     font-size: 52px; line-height: 1; color: var(--text3);
     opacity: 0; will-change: transform, opacity;
+    transition: color .12s linear;
   }
   .digit.on { color: var(--accent); }
 
   @media (prefers-reduced-motion: reduce) {
-    .digit { opacity: 1; }
+    .digit { opacity: 1; transition: none; }
   }
 </style>

@@ -7,7 +7,7 @@
   import Splash from "./lib/Splash.svelte";
   import { AppController, type UiState } from "./lib/controller.js";
   import { listProjects, deleteProjectDraft, renameProjectDraft, type ProjectMeta } from "./lib/draft.js";
-  import { TEMPLATES, type TemplateId } from "./lib/templates.js";
+  import { type TemplateId } from "./lib/templates.js";
 
   const ctrl = new AppController();
 
@@ -155,8 +155,6 @@
     ctrl.setSpeed(speed);
   }
 
-  const dev = import.meta.env?.DEV ?? false;
-
   // One-time first-run hint in the editor.
   let hintDismissed = $state(
     typeof localStorage !== "undefined" && localStorage.getItem("quadstate:hintSeen") === "1",
@@ -227,24 +225,6 @@
       <button disabled={ui.editing != null} onclick={() => ctrl.saveProject()}>Save</button>
       <button disabled={ui.editing != null} onclick={() => ctrl.openProject()}>Open</button>
     </div>
-    <div class="seg">
-      <select class="examples" title="Load an example circuit"
-        disabled={ui.diving || ui.editing != null}
-        onchange={(e) => {
-          const v = (e.currentTarget as HTMLSelectElement).value;
-          if (v) { ctrl.openTemplate(v as TemplateId); (e.currentTarget as HTMLSelectElement).value = ""; }
-        }}>
-        <option value="">Examples ▾</option>
-        {#each TEMPLATES as t}<option value={t.id}>{t.label}</option>{/each}
-      </select>
-    </div>
-    {#if dev}
-      <div class="seg">
-        <button class="demo" onclick={() => ctrl.loadXorDemo()} title="Seed the P0 XOR acceptance demo">XOR demo</button>
-      </div>
-    {/if}
-
-    <span class="status" class:ok={ui.statusOk}>{ui.status} · t={ui.simTime}</span>
   </header>
 
   <div class="body">
@@ -372,6 +352,12 @@
         {/if}
         <button class="watch-add" disabled={!ui.canWatch} onclick={() => ctrl.addWatchSelected()}>+ Watch selected wire</button>
       </div>
+
+      <div class="rail-section status-section">
+        <div class="rail-label">STATUS / WARNINGS</div>
+        <div class="status-line" class:warn={!ui.statusOk}>{ui.status}</div>
+        <div class="status-tick">t = {ui.simTime}</div>
+      </div>
     </aside>
   </div>
 </div>
@@ -418,21 +404,16 @@
   button.active { background: var(--accentQuiet); border-color: var(--accent); color: var(--text1); }
   .transport button.run { color: var(--text1); border-color: var(--hairlineStrong); }
   button.chip:not(:disabled) { color: var(--text1); }
-  button.demo { border-color: var(--accent); color: var(--accent); }
 
   .speed { display: flex; align-items: center; gap: 7px; color: var(--text3); font-size: 12px; font-family: ui-monospace, monospace; }
   .speed input { width: 96px; }
 
-  .examples {
-    background: var(--surface1); color: var(--text2);
-    border: 1px solid var(--hairline); border-radius: 8px;
-    padding: 6px 10px; cursor: pointer; font: inherit; font-size: 13px;
-  }
-  .examples:hover:not(:disabled) { background: var(--surface2); color: var(--text1); }
-  .examples:disabled { opacity: 0.4; cursor: default; }
-
-  .status { margin-left: 4px; color: var(--text3); font-size: 12px; font-family: ui-monospace, monospace; }
-  .status.ok { color: var(--text2); }
+  /* Status / Warnings — moved out of the header into the right rail. Monochrome
+     by the visual-system rule (signal colors stay reserved for the canvas). */
+  .status-line { font-size: 12px; color: var(--text2); line-height: 1.5; font-family: ui-monospace, monospace; word-break: break-word; }
+  .status-line.warn { color: var(--text1); }
+  .status-line.warn::before { content: "⚠ "; color: var(--text1); }
+  .status-tick { margin-top: 6px; font-size: 11px; color: var(--text3); font-family: ui-monospace, monospace; }
 
   .body { display: flex; flex: 1 1 auto; min-height: 0; }
 

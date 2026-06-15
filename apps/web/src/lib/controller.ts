@@ -1,6 +1,6 @@
 import {
   CanvasStack, GestureRecognizer, ModelessTool, PlaceTool,
-  SpatialGrid, Viewport, aggregateBus, busBin, busHex, componentBounds, hitTest, isIo, stampOrigin, wireBounds,
+  SpatialGrid, Viewport, aggregateBus, busBin, busHex, componentBounds, hitTest, isIo, portPosition, stampOrigin, wireBounds, wireJunctions, wireSegments,
   renderInk, renderOverlay, renderSchematic, renderSignals,
   type HitResult, type Intent, type OverlayState, type PointerKind, type RenderState,
   type Tool, type ToolContext,
@@ -165,7 +165,14 @@ export class AppController {
     // projects from Home), so drop the previous attach's listeners/loop first.
     this.teardown?.();
     if (import.meta.env?.DEV) {
-      (window as unknown as Record<string, unknown>).__logicsim = this;
+      const w = window as unknown as Record<string, unknown>;
+      w.__logicsim = this;
+      // Dev-only geometry helpers (routing/junction debugging).
+      w.__geom = {
+        segments: (wireId: number) => wireSegments(this.doc, this.lib, wireId),
+        junctions: () => wireJunctions(this.doc, this.lib),
+        portPos: (componentId: number, pin: string) => portPosition(this.doc, this.lib, componentId, pin),
+      };
     }
     this.container = container;
     this.stack = new CanvasStack(container);
