@@ -11,10 +11,22 @@
   } = $props();
 
   let search = $state("");
-  // Collapsed state per category, seeded from each category's defaultOpen.
-  let collapsed = $state<Record<string, boolean>>(
-    Object.fromEntries(PALETTE_CATALOG.map((c) => [c.id, !c.defaultOpen])),
-  );
+
+  // Collapsed state per category — seeded from defaultOpen, then overlaid with
+  // the user's saved preference so open/closed sections persist across sessions.
+  const STORE_KEY = "quadstate.palette.collapsed";
+  function loadCollapsed(): Record<string, boolean> {
+    const base = Object.fromEntries(PALETTE_CATALOG.map((c) => [c.id, !c.defaultOpen]));
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      if (raw) Object.assign(base, JSON.parse(raw) as Record<string, boolean>);
+    } catch { /* storage unavailable — fall back to defaults */ }
+    return base;
+  }
+  let collapsed = $state<Record<string, boolean>>(loadCollapsed());
+  function persistCollapsed(): void {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(collapsed)); } catch { /* ignore */ }
+  }
 
   interface DisplayItem {
     key: string; label: string; icon: string; enabled: boolean;
@@ -61,17 +73,34 @@
   function toggle(catId: string): void {
     if (q.length > 0) return; // categories are force-open while searching
     collapsed[catId] = !collapsed[catId];
+    persistCollapsed();
   }
 
   function tileDown(d: DisplayItem, e: PointerEvent): void {
     if (!d.enabled || !d.part) return;
     ctrl.beginPaletteDrag(d.part, e, d.props ?? {});
   }
+
+  // Keyboard: Enter / Space arms stamp mode (accessible placement; canvas tap drops it).
+  function tileKey(d: DisplayItem, e: KeyboardEvent): void {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    if (d.enabled && d.part) ctrl.setPlacePart(d.part, d.props ?? {});
+  }
+
+  const clearSearch = (): void => { search = ""; };
 </script>
 
 <aside class="palette">
   <div class="search">
-    <input type="text" placeholder="Search components" aria-label="Search components" bind:value={search} />
+    <div class="search-box">
+      <span class="search-ico" aria-hidden="true">{@html `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg>`}</span>
+      <input type="text" placeholder="Search components" aria-label="Search components"
+        bind:value={search} onkeydown={(e) => { if (e.key === "Escape") clearSearch(); }} />
+      {#if search}
+        <button class="search-clear" title="Clear search" aria-label="Clear search" onclick={clearSearch}>×</button>
+      {/if}
+    </div>
   </div>
   <div class="cats">
     {#each cats as cat (cat.id)}
@@ -91,9 +120,11 @@
                 aria-disabled={!d.enabled}
                 title={d.tooltip}
                 onpointerdown={(e) => tileDown(d, e)}
+                onkeydown={(e) => tileKey(d, e)}
               >
                 <span class="ico">{@html `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${iconSvg(d.icon)}</svg>`}</span>
                 <span class="tile-label">{d.label}</span>
+                {#if !d.enabled}<span class="soon">soon</span>{/if}
               </button>
             {/each}
           </div>
@@ -112,13 +143,25 @@
     min-height: 0; background: var(--bg); border-right: 1px solid var(--hairline);
   }
   .search { padding: 10px 10px 6px; flex: 0 0 auto; }
+  .search-box { position: relative; display: flex; align-items: center; }
+  .search-ico {
+    position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+    color: var(--text3); pointer-events: none; display: inline-flex;
+  }
   .search input {
     width: 100%; box-sizing: border-box; background: var(--surface1);
     border: 1px solid var(--hairline); border-radius: 8px; color: var(--text1);
-    font: inherit; font-size: 12px; padding: 6px 9px;
+    font: inherit; font-size: 12px; padding: 6px 26px 6px 28px;
   }
   .search input::placeholder { color: var(--text3); }
   .search input:focus { outline: none; border-color: var(--accent); }
+  .search-clear {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; border: none; color: var(--text3); cursor: pointer;
+    font-size: 15px; line-height: 1; border-radius: 4px;
+  }
+  .search-clear:hover { color: var(--text1); background: var(--surface3); }
 
   .cats { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 2px 6px 14px; }
   .cat { margin-top: 2px; }
@@ -151,5 +194,10 @@
   .tile:hover .ico, .tile.active .ico { color: var(--text1); }
   .tile.disabled .ico { color: var(--text3); }
   .tile-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .soon {
+    flex: 0 0 auto; font-size: 8.5px; font-weight: 600; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--text3); border: 1px solid var(--hairline);
+    border-radius: 4px; padding: 1px 4px;
+  }
   .empty { color: var(--text3); font-size: 12px; padding: 14px 8px; }
 </style>
