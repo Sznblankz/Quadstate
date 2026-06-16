@@ -4,7 +4,7 @@
   import AccountMenu from "./AccountMenu.svelte";
   import { loadProjectDraft, type ProjectMeta } from "./draft.js";
   import { renderThumbnail } from "./thumbnail.js";
-  import { TEMPLATES, type TemplateId } from "./templates.js";
+  import { TEMPLATES, templateProjectJson, type TemplateId } from "./templates.js";
 
   let { recents, onNew, onOpen, onTemplate, onRename, onDelete, onOpenSettings }: {
     recents: ProjectMeta[];
@@ -38,6 +38,17 @@
     const d = loadProjectDraft(p.id);
     const url = d ? renderThumbnail(d.json, THUMB_W, THUMB_H) : null;
     thumbCache.set(key, url);
+    return url;
+  }
+
+  // Template previews — rendered once from each template's own circuit, memoised.
+  const TPL_W = 260, TPL_H = 96;
+  const tplThumbCache = new Map<TemplateId, string | null>();
+  function tplThumb(id: TemplateId): string | null {
+    if (tplThumbCache.has(id)) return tplThumbCache.get(id)!;
+    let url: string | null = null;
+    try { url = renderThumbnail(templateProjectJson(id), TPL_W, TPL_H, 2); } catch { url = null; }
+    tplThumbCache.set(id, url);
     return url;
   }
 
@@ -94,9 +105,18 @@
         <div class="eyebrow">TEMPLATES</div>
         <div class="tpl-row">
           {#each TEMPLATES as t}
-            <button class="tpl" onclick={() => onTemplate(t.id)}>
-              <span class="tpl-thumb" aria-hidden="true"></span>
-              <span class="tpl-name">{t.label}</span>
+            {@const thumb = tplThumb(t.id)}
+            <button class="tpl" onclick={() => onTemplate(t.id)} title={t.desc}>
+              <span class="tpl-thumb" class:has={!!thumb} aria-hidden="true">
+                {#if thumb}<img src={thumb} alt="" draggable="false" />{/if}
+              </span>
+              <span class="tpl-name">
+                <span class="tpl-label">{t.label}</span>
+                {#if t.timing}
+                  <span class="tpl-wave" title="Demonstrates the timing diagram" aria-hidden="true">{@html `<svg viewBox="0 0 24 12" width="20" height="10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 9h3V3h4v6h4V3h4v6h3"/></svg>`}</span>
+                {/if}
+              </span>
+              <span class="tpl-desc">{t.desc}</span>
             </button>
           {/each}
         </div>
@@ -216,11 +236,16 @@
   /* Templates — horizontal row near the top. */
   .templates { flex: 0 0 auto; display: flex; flex-direction: column; gap: 12px; }
   .tpl-row { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; }
-  .tpl { flex: 0 0 auto; width: 130px; text-align: left; background: var(--surface1); border: 1px solid var(--hairline); border-radius: 12px; padding: 10px; cursor: pointer; color: var(--text1); font: inherit; display: flex; flex-direction: column; gap: 8px; transition: background .16s ease, border-color .16s ease, transform .16s ease; }
+  .tpl { flex: 0 0 auto; width: 168px; text-align: left; background: var(--surface1); border: 1px solid var(--hairline); border-radius: 12px; padding: 10px; cursor: pointer; color: var(--text1); font: inherit; display: flex; flex-direction: column; gap: 8px; transition: background .16s ease, border-color .16s ease, transform .16s ease; }
   .tpl:hover { background: var(--surface2); border-color: var(--hairlineStrong); transform: translateY(-1px); }
   .tpl:active { transform: translateY(0); }
-  .tpl-thumb { height: 52px; border-radius: 8px; background: var(--bg); background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 12px 12px; box-shadow: inset 0 0 0 1px var(--hairline); }
-  .tpl-name { font-size: 13px; font-weight: 500; }
+  .tpl-thumb { height: 62px; border-radius: 8px; overflow: hidden; background: var(--bg); background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 12px 12px; box-shadow: inset 0 0 0 1px var(--hairline); }
+  .tpl-thumb.has { background-image: none; }
+  .tpl-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tpl-name { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+  .tpl-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tpl-wave { flex: 0 0 auto; color: var(--text3); display: inline-flex; }
+  .tpl-desc { font-size: 11px; color: var(--text3); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
   /* My Projects — the main contained, internally-scrolling panel. */
   .library { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; background: var(--surface1); border: 1px solid var(--hairline); border-radius: 16px; overflow: hidden; }

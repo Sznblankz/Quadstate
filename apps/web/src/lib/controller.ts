@@ -1325,6 +1325,10 @@ export class AppController {
           return c.props.name;
         }
       }
+      // Cosmetic fallback: a clock-driven wire reads "clk" rather than "net N".
+      for (const p of w.ports) {
+        if (this.doc.components.get(p.component)?.part === "builtin:clock") return "clk";
+      }
     }
     return `net ${id}`;
   }
@@ -1499,10 +1503,14 @@ export class AppController {
     this.projectId = newProjectId();
     this.newProject(TEMPLATES.find((t) => t.id === id)?.label ?? "Example");
     const libId = (name: string): string => this.libraryParts.find((p) => p.name === name)?.id ?? "";
-    buildTemplate(id, this.doc, this.history, this.selection, libId);
+    const trackedWires = buildTemplate(id, this.doc, this.history, this.selection, libId);
+    // Open with the example's signals already on the timing diagram.
+    this.tracked = trackedWires
+      .filter((wid) => this.doc.wires.has(wid))
+      .map((wid) => ({ kind: "wire", wireId: wid }));
     this.selection.clear();
-    this.recompile();
-    this.bridge.setRunning(this.startLive); // Settings → Start live on open
+    this.recompile(); // resolves the tracked wires → subscribes the scope
+    this.bridge.setRunning(true); // examples are demos — run so the scope animates
     this.flushDraft();
     this.fitOnOpen();
     this.dirtyStatic = true;
