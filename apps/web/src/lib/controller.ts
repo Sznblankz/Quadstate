@@ -1182,6 +1182,9 @@ export class AppController {
   /** Which local project slot autosave writes to (one per recent). */
   private projectId = "";
   private draftTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Latched once a local save fails, so the warning surfaces once rather than
+   *  on every 400ms autosave; cleared when a save next succeeds. */
+  private draftSaveFailed = false;
 
   /** Debounced autosave of the working project to its slot. */
   private autosaveDraft(): void {
@@ -1194,7 +1197,19 @@ export class AppController {
   flushDraft(): void {
     if (this.editing || !this.projectId) return;
     if (this.draftTimer) { clearTimeout(this.draftTimer); this.draftTimer = null; }
-    try { saveProjectDraft(this.projectId, this.projectName, this.serializeProject()); } catch { /* ignore */ }
+    let ok = false;
+    try { ok = saveProjectDraft(this.projectId, this.projectName, this.serializeProject()); }
+    catch { ok = false; } // serializeProject itself threw
+    if (!ok && !this.draftSaveFailed) {
+      // Surface the first failure (storage full / blocked) once — silent
+      // autosave loss is the worst outcome. Don't repeat it every autosave.
+      this.draftSaveFailed = true;
+      this.status = "couldn't save locally — storage may be full or blocked";
+      this.statusOk = false;
+      this.pushUi();
+    } else if (ok) {
+      this.draftSaveFailed = false; // recovered; allow a future failure to show
+    }
   }
 
   /** Clear the in-memory document to a blank project (no slot change). */

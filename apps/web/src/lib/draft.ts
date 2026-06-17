@@ -51,13 +51,20 @@ export function listProjects(): ProjectMeta[] {
   return index().slice().sort((a, b) => b.savedAt - a.savedAt);
 }
 
-export function saveProjectDraft(id: string, name: string, json: string): void {
+/** Persist a project draft + its index entry. Returns false when storage is
+ *  full / blocked / unavailable so the caller can surface the failure instead
+ *  of silently losing the edit. The slot + index write share one try so a
+ *  half-written state still reports failure. */
+export function saveProjectDraft(id: string, name: string, json: string): boolean {
   try {
     localStorage.setItem(SLOT(id), json);
     const idx = index().filter((p) => p.id !== id);
     idx.push({ id, name, savedAt: Date.now() });
-    writeIndex(idx);
-  } catch { /* full/blocked */ }
+    localStorage.setItem(INDEX_KEY, JSON.stringify(idx));
+    return true;
+  } catch {
+    return false; // quota exceeded / private mode / storage disabled
+  }
 }
 
 export function loadProjectDraft(id: string): { name: string; json: string } | null {
