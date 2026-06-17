@@ -31,8 +31,8 @@ function builder() {
     const cmd = addWire(doc, ports.map(([c, p]) => ({ component: c, pin: p })));
     cmd.apply(doc);
   };
-  const IN = (name: string): EntityId => C("io:in", { name, width: 1, value: 0 });
-  const OUT = (name: string): EntityId => C("io:out", { name, width: 1 });
+  const IN = (name: string, width = 1): EntityId => C("io:in", { name, width, value: 0 });
+  const OUT = (name: string, width = 1): EntityId => C("io:out", { name, width });
   return { doc, C, W, IN, OUT };
 }
 
@@ -85,6 +85,60 @@ function jkFlipFlop(lib: PartLibrary): LibraryPart {
     W([nk, "y"], [a2, "a"]); W([q, "pin"], [a2, "b"]);   // !K & Q
     W([a1, "y"], [o, "a"]); W([a2, "y"], [o, "b"]); W([o, "y"], [dff, "d"]);
     W([clk, "pin"], [dff, "clk"]);
+  });
+}
+
+// ---- T flip-flop (edge-triggered toggle): D = Q ^ T, so Q flips on each clk
+//      rising edge while T=1 and holds while T=0.
+function tFlipFlop(lib: PartLibrary): LibraryPart {
+  return structural(lib, "T Flip-Flop", ({ C, W, IN, OUT }) => {
+    const t = IN("T"), clk = IN("clk");
+    const xo = C("builtin:xor");
+    const dff = C("builtin:dff", { init: 0 });
+    const nq = C("builtin:not");
+    const q = OUT("Q"), qn = OUT("Qn");
+    W([dff, "q"], [q, "pin"]);
+    W([q, "pin"], [xo, "a"]); W([t, "pin"], [xo, "b"]); W([xo, "y"], [dff, "d"]); // D = Q ^ T
+    W([clk, "pin"], [dff, "clk"]);
+    W([q, "pin"], [nq, "a"]); W([nq, "y"], [qn, "pin"]);
+  });
+}
+
+// ---- Half adder: sum = a ^ b, carry = a & b.
+function halfAdder(lib: PartLibrary): LibraryPart {
+  return structural(lib, "Half Adder", ({ C, W, IN, OUT }) => {
+    const a = IN("a"), b = IN("b");
+    const xo = C("builtin:xor"), an = C("builtin:and");
+    const sum = OUT("sum"), carry = OUT("carry");
+    W([a, "pin"], [xo, "a"]); W([b, "pin"], [xo, "b"]); W([xo, "y"], [sum, "pin"]);
+    W([a, "pin"], [an, "a"]); W([b, "pin"], [an, "b"]); W([an, "y"], [carry, "pin"]);
+  });
+}
+
+// ---- Full adder: sum = a ^ b ^ cin, cout = (a & b) | ((a ^ b) & cin).
+function fullAdder(lib: PartLibrary): LibraryPart {
+  return structural(lib, "Full Adder", ({ C, W, IN, OUT }) => {
+    const a = IN("a"), b = IN("b"), cin = IN("cin");
+    const x1 = C("builtin:xor"), x2 = C("builtin:xor");
+    const a1 = C("builtin:and"), a2 = C("builtin:and"), o = C("builtin:or");
+    const sum = OUT("sum"), cout = OUT("cout");
+    W([a, "pin"], [x1, "a"]); W([b, "pin"], [x1, "b"]);          // a ^ b
+    W([x1, "y"], [x2, "a"]); W([cin, "pin"], [x2, "b"]); W([x2, "y"], [sum, "pin"]);
+    W([a, "pin"], [a1, "a"]); W([b, "pin"], [a1, "b"]);          // a & b
+    W([x1, "y"], [a2, "a"]); W([cin, "pin"], [a2, "b"]);         // (a ^ b) & cin
+    W([a1, "y"], [o, "a"]); W([a2, "y"], [o, "b"]); W([o, "y"], [cout, "pin"]);
+  });
+}
+
+// ---- 4-bit register: a single width-4 DFF latches the d bus on the clk edge.
+function register4(lib: PartLibrary): LibraryPart {
+  return structural(lib, "Register (4-bit)", ({ C, W, IN, OUT }) => {
+    const d = IN("d", 4), clk = IN("clk");
+    const dff = C("builtin:dff", { init: 0 });
+    const q = OUT("q", 4);
+    W([d, "pin"], [dff, "d"]);
+    W([clk, "pin"], [dff, "clk"]);
+    W([dff, "q"], [q, "pin"]);
   });
 }
 
@@ -175,9 +229,13 @@ export function registerStandardLibrary(lib: PartLibrary): LibraryPart[] {
     srLatch(lib),
     dLatch(lib),
     jkFlipFlop(lib),
+    tFlipFlop(lib),
     decoder2to4(lib),
     encoder4to2(lib),
     counter4(lib),
+    register4(lib),
+    halfAdder(lib),
+    fullAdder(lib),
     sevenSegDecoder(lib),
   ];
 }

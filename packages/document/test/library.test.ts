@@ -35,10 +35,66 @@ describe("standard library (P11)", () => {
     const { l } = lib();
     const parts = registerStandardLibrary(l); // re-register: content-addressed, no dupes
     expect(parts.map((p) => p.name)).toEqual([
-      "SR Latch", "D Latch", "JK Flip-Flop", "2→4 Decoder",
-      "4→2 Encoder", "4-bit Counter", "7-Seg Decoder",
+      "SR Latch", "D Latch", "JK Flip-Flop", "T Flip-Flop", "2→4 Decoder",
+      "4→2 Encoder", "4-bit Counter", "Register (4-bit)", "Half Adder",
+      "Full Adder", "7-Seg Decoder",
     ]);
     expect(new Set(parts.map((p) => p.id)).size).toBe(parts.length);
+  });
+
+  it("T flip-flop toggles each edge while T=1 and holds while T=0", () => {
+    const { l, byName } = lib();
+    const d = driver(l, byName("T Flip-Flop").id);
+    expect(d.get("Q")).toBe(LO); // init 0
+    d.set("T", 1); d.pulse(); expect(d.get("Q"), "toggle 1").toBe(HI);
+    d.pulse(); expect(d.get("Q"), "toggle 2").toBe(LO);
+    d.set("T", 0); d.pulse(); expect(d.get("Q"), "hold while T=0").toBe(LO);
+    d.set("T", 1); d.pulse(); expect(d.get("Q"), "toggle again").toBe(HI);
+    expect(d.get("Qn")).toBe(LO);
+  });
+
+  it("half adder sums two bits", () => {
+    const { l, byName } = lib();
+    const d = driver(l, byName("Half Adder").id);
+    const run = (a: number, b: number) => {
+      d.set("a", a); d.set("b", b); d.step();
+      return [d.get("sum") === HI ? 1 : 0, d.get("carry") === HI ? 1 : 0];
+    };
+    expect(run(0, 0)).toEqual([0, 0]);
+    expect(run(1, 0)).toEqual([1, 0]);
+    expect(run(0, 1)).toEqual([1, 0]);
+    expect(run(1, 1)).toEqual([0, 1]);
+  });
+
+  it("full adder sums three bits into sum + carry", () => {
+    const { l, byName } = lib();
+    const d = driver(l, byName("Full Adder").id);
+    for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) for (let cin = 0; cin < 2; cin++) {
+      d.set("a", a); d.set("b", b); d.set("cin", cin); d.step();
+      const got = (d.get("cout") === HI ? 2 : 0) + (d.get("sum") === HI ? 1 : 0);
+      expect(got, `${a}+${b}+${cin}`).toBe(a + b + cin);
+    }
+  });
+
+  it("4-bit register latches the data bus on the clock edge and holds between", () => {
+    const { l, byName } = lib();
+    const c = instantiate(l, byName("Register (4-bit)").id);
+    let t = 0;
+    const step = () => { t += 1; c.sim.run(t); };
+    const setBus = (val: number) => {
+      const ns = c.elab.inputs.get("d")!;
+      ns.forEach((n, i) => c.sim.setInput(n, ((val >> i) & 1) ? HI : LO, t + 1));
+    };
+    const clk = (v: number) => c.sim.setInput(c.elab.inputs.get("clk")![0], v ? HI : LO, t + 1);
+    const q = () => c.elab.outputs.get("q")!.reduce((acc, n, i) => acc | ((c.sim.value(n) === HI ? 1 : 0) << i), 0);
+
+    setBus(0b1010); clk(0); step();
+    clk(1); step(); clk(0); step();            // rising edge latches 0b1010
+    expect(q()).toBe(0b1010);
+    setBus(0b0101); step();
+    expect(q(), "holds until the next edge").toBe(0b1010);
+    clk(1); step(); clk(0); step();
+    expect(q()).toBe(0b0101);
   });
 
   it("SR latch sets, resets, and holds", () => {

@@ -84,8 +84,8 @@ export const PALETTE_CATALOG: PaletteCategory[] = [
       on("srlatch", "SR Latch", "srlatch", { libraryName: "SR Latch" }, ["sr", "latch", "set reset"]),
       on("dlatch", "D Latch", "dlatch", { libraryName: "D Latch" }, ["latch", "transparent"]),
       on("counter", "Counter (4-bit)", "counter", { libraryName: "4-bit Counter" }, ["count", "ripple"]),
-      planned("tff", "T Flip-Flop", "tff", "digital", ["toggle", "flop"]),
-      planned("register", "Register (4-bit)", "register", "digital", ["reg", "storage"]),
+      on("tff", "T Flip-Flop", "tff", { libraryName: "T Flip-Flop" }, ["toggle", "flop"]),
+      on("register", "Register (4-bit)", "register", { libraryName: "Register (4-bit)" }, ["reg", "storage"]),
     ],
   },
   {
@@ -96,8 +96,8 @@ export const PALETTE_CATALOG: PaletteCategory[] = [
   },
   {
     id: "arithmetic", label: "Arithmetic", defaultOpen: false, items: [
-      planned("halfadder", "Half Adder", "adder", "digital", ["add", "sum"]),
-      planned("fulladder", "Full Adder", "adder", "digital", ["add", "carry", "sum"]),
+      on("halfadder", "Half Adder", "adder", { libraryName: "Half Adder" }, ["add", "sum"]),
+      on("fulladder", "Full Adder", "adder", { libraryName: "Full Adder" }, ["add", "carry", "sum"]),
     ],
   },
   {
