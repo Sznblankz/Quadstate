@@ -1,6 +1,6 @@
 import { elaborate, PartLibrary, SchemaError, type Elaboration } from "@logicsim/schema";
 import { exportProject, type CircuitDocument, type EntityId } from "@logicsim/document";
-import type { Transition } from "@logicsim/engine";
+import { SCOPE_CAP, type Transition } from "@logicsim/engine";
 import type { WorkerIn, WorkerOut } from "./worker.js";
 
 export interface CompileStatus {
@@ -54,6 +54,9 @@ export class SimBridge {
           let arr = this.scopeHistory.get(d.net);
           if (!arr) { arr = []; this.scopeHistory.set(d.net, arr); }
           for (const t of d.transitions) arr.push(t);
+          // Mirror the worker's ring eviction so long-running scopes don't grow
+          // unbounded on the main thread (the worker only ships forward deltas).
+          if (arr.length > SCOPE_CAP) arr.splice(0, arr.length - SCOPE_CAP);
         }
         this.onTrace?.();
       } else if (e.data.type === "smokeResult") {

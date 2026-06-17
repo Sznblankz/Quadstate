@@ -9,6 +9,7 @@
   import Splash from "./lib/Splash.svelte";
   import AccountMenu from "./lib/AccountMenu.svelte";
   import Settings from "./lib/Settings.svelte";
+  import HelpOverlay from "./lib/HelpOverlay.svelte";
   import { AppController, type UiState } from "./lib/controller.js";
   import { listProjects, deleteProjectDraft, renameProjectDraft, type ProjectMeta } from "./lib/draft.js";
   import { type TemplateId } from "./lib/templates.js";
@@ -19,6 +20,16 @@
   // Settings overlay (shared across Home + editor).
   applyReducedMotion(); // mirror the saved choice onto <html> before first paint
   let settingsOpen = $state(false);
+  let helpOpen = $state(false);
+
+  // "?" opens the shortcuts legend in the editor (ignored while typing or in a dialog).
+  function appKeydown(e: KeyboardEvent) {
+    if (e.key !== "?" || view !== "editor" || settingsOpen || helpOpen) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    helpOpen = true;
+    e.preventDefault();
+  }
   let settingsSection = $state<"account" | undefined>(undefined);
   function openSettings(section?: "account") { settingsSection = section; settingsOpen = true; }
   function closeSettings() { settingsOpen = false; }
@@ -181,6 +192,8 @@
   }
 </script>
 
+<svelte:window onkeydown={appKeydown} />
+
 {#if booted}
 {#if view === "home"}
   <HomeView {recents} onNew={goNew} onOpen={openRecent} onTemplate={openTemplate}
@@ -240,6 +253,10 @@
     <div class="seg">
       <button disabled={ui.editing != null} onclick={() => ctrl.saveProject()}>Save</button>
       <button disabled={ui.editing != null} onclick={() => ctrl.openProject()}>Open</button>
+    </div>
+
+    <div class="seg">
+      <button class="help-btn" title="Shortcuts & gestures (?)" aria-label="Shortcuts and gestures" onclick={() => helpOpen = true}>?</button>
     </div>
 
     <div class="seg account-seg">
@@ -363,6 +380,12 @@
   </div>
 {/if}
 
+{#if helpOpen}
+  <div style={tokenStyle}>
+    <HelpOverlay onClose={() => helpOpen = false} />
+  </div>
+{/if}
+
 {#if portal}
   <div class="portal" use:portalFade={portal} style={tokenStyle}>
     {#if portal.thumb}<img src={portal.thumb} alt="" />{/if}
@@ -406,6 +429,7 @@
 
   .speed { display: flex; align-items: center; gap: 7px; color: var(--text3); font-size: 12px; font-family: ui-monospace, monospace; }
   .speed input { width: 96px; }
+  .help-btn { width: 32px; padding: 6px 0; text-align: center; font-weight: 600; }
 
   /* Status / Warnings — moved out of the header into the right rail. Monochrome
      by the visual-system rule (signal colors stay reserved for the canvas). */
