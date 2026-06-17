@@ -25,7 +25,9 @@
       ? recents.filter((p) => p.name.toLowerCase().includes(query.trim().toLowerCase()))
       : recents,
   );
-  const resume = $derived(recents.length ? recents[0] : null);
+  // The Continue rail shows the three most-recent projects (savedAt-sorted ≈
+  // last opened); the first is featured, the next two are compact rows.
+  const resumeList = $derived(recents.slice(0, 3));
 
   // Thumbnails are rendered from each project's saved circuit and memoised by
   // id+savedAt, so a re-saved project re-renders but list shuffles don't.
@@ -61,8 +63,13 @@
   }
 
   function open(id: string, e: MouseEvent): void {
-    const card = (e.currentTarget as HTMLElement).closest(".card");
-    const thumbEl = card?.querySelector(".thumb") ?? (e.currentTarget as HTMLElement);
+    // Prefer the button's own .thumb (Continue cards), else the parent card's
+    // .thumb (My Projects), else the button itself — so any opener seeds a
+    // sensible portal origin rect.
+    const cur = e.currentTarget as HTMLElement;
+    const thumbEl = cur.querySelector(".thumb")
+      ?? cur.closest(".card")?.querySelector(".thumb")
+      ?? cur;
     const rect = thumbEl.getBoundingClientRect();
     onOpen(id, rect, thumbFor(recents.find((p) => p.id === id)!));
   }
@@ -199,16 +206,31 @@
         <span class="action-title">New Circuit</span>
         <span class="action-sub">Start a blank canvas</span>
       </button>
-      {#if resume}
-        {@const rthumb = thumbFor(resume)}
-        <button class="action resume" onclick={(e) => open(resume.id, e)}>
+      {#if resumeList.length}
+        {@const feat = resumeList[0]}
+        {@const fthumb = thumbFor(feat)}
+        <div class="continue">
           <span class="eyebrow">CONTINUE</span>
-          <span class="thumb resume-thumb" class:has={!!rthumb}>
-            {#if rthumb}<img src={rthumb} alt="" draggable="false" />{/if}
-          </span>
-          <span class="action-title">{resume.name}</span>
-          <span class="action-sub">edited {ago(resume.savedAt)} · Resume →</span>
-        </button>
+          <button class="action resume" onclick={(e) => open(feat.id, e)}>
+            <span class="thumb resume-thumb" class:has={!!fthumb}>
+              {#if fthumb}<img src={fthumb} alt="" draggable="false" />{/if}
+            </span>
+            <span class="action-title">{feat.name}</span>
+            <span class="action-sub">edited {ago(feat.savedAt)} · Resume →</span>
+          </button>
+          {#each resumeList.slice(1) as p (p.id)}
+            {@const rthumb = thumbFor(p)}
+            <button class="resume-row" onclick={(e) => open(p.id, e)}>
+              <span class="thumb row-thumb" class:has={!!rthumb}>
+                {#if rthumb}<img src={rthumb} alt="" draggable="false" />{/if}
+              </span>
+              <span class="row-text">
+                <span class="row-name">{p.name}</span>
+                <span class="row-meta">edited {ago(p.savedAt)}</span>
+              </span>
+            </button>
+          {/each}
+        </div>
       {/if}
     </aside>
   </div>
@@ -310,13 +332,24 @@
   .action.new:active { transform: translateY(0); }
   .action.new .action-sub { color: rgba(255,255,255,0.82); }
   .action.new .plus { font-size: 30px; font-weight: 300; line-height: 1; margin-bottom: 4px; }
-  .action.resume { min-height: 260px; }
+  /* Continue rail — featured card + up to two compact rows, fitting the column. */
+  .continue { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+  .continue .eyebrow { padding: 0 2px; }
+  .action.resume { flex: 1 1 auto; min-height: 150px; }
   .action.resume:hover { background: var(--surface2); border-color: var(--hairlineStrong); transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
-  .resume-thumb { flex: 1; min-height: 130px; margin: 10px 0; border-radius: 10px; overflow: hidden; background: var(--bg); background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 16px 16px; box-shadow: inset 0 0 0 1px var(--hairline); }
+  .resume-thumb { flex: 1; min-height: 70px; margin: 8px 0; border-radius: 10px; overflow: hidden; background: var(--bg); background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 16px 16px; box-shadow: inset 0 0 0 1px var(--hairline); }
+
+  .resume-row { flex: 0 0 auto; display: flex; align-items: center; gap: 11px; text-align: left; background: var(--surface1); border: 1px solid var(--hairline); border-radius: 12px; padding: 9px; cursor: pointer; font: inherit; color: var(--text1); transition: background .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
+  .resume-row:hover { background: var(--surface2); border-color: var(--hairlineStrong); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,0.32); }
+  .resume-row:active { transform: translateY(0); }
+  .row-thumb { flex: 0 0 auto; width: 64px; height: 44px; border-radius: 8px; overflow: hidden; background: var(--bg); background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 12px 12px; box-shadow: inset 0 0 0 1px var(--hairline); }
+  .row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .row-name { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-meta { font-size: 11px; color: var(--text3); font-family: ui-monospace, monospace; }
 
   @media (prefers-reduced-motion: reduce) {
     .content, .actions { animation: none; }
-    .tpl, .card-body, .action, .card-actions { transition: none; }
-    .tpl:hover, .card:hover .card-body, .action:hover { transform: none; }
+    .tpl, .card-body, .action, .card-actions, .resume-row { transition: none; }
+    .tpl:hover, .card:hover .card-body, .action:hover, .resume-row:hover { transform: none; }
   }
 </style>
