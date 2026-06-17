@@ -10,6 +10,7 @@
   import AccountMenu from "./lib/AccountMenu.svelte";
   import Settings from "./lib/Settings.svelte";
   import HelpOverlay from "./lib/HelpOverlay.svelte";
+  import ShareSheet from "./lib/ShareSheet.svelte";
   import { AppController, type UiState } from "./lib/controller.js";
   import { listProjects, deleteProjectDraft, renameProjectDraft, type ProjectMeta } from "./lib/draft.js";
   import { type TemplateId } from "./lib/templates.js";
@@ -21,10 +22,11 @@
   applyReducedMotion(); // mirror the saved choice onto <html> before first paint
   let settingsOpen = $state(false);
   let helpOpen = $state(false);
+  let shareOpen = $state(false);
 
   // "?" opens the shortcuts legend in the editor (ignored while typing or in a dialog).
   function appKeydown(e: KeyboardEvent) {
-    if (e.key !== "?" || view !== "editor" || settingsOpen || helpOpen) return;
+    if (e.key !== "?" || view !== "editor" || settingsOpen || helpOpen || shareOpen) return;
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
     helpOpen = true;
@@ -253,6 +255,10 @@
     <div class="seg">
       <button disabled={ui.editing != null} onclick={() => ctrl.saveProject()}>Save</button>
       <button disabled={ui.editing != null} onclick={() => ctrl.openProject()}>Open</button>
+      <button disabled={ui.editing != null} onclick={() => ctrl.importChip()}
+        title="Import a shared chip bundle into the palette">Import</button>
+      <button class="share" disabled={ui.editing != null} onclick={() => shareOpen = true}
+        title="Share / export this circuit">Share</button>
     </div>
 
     <div class="seg">
@@ -386,6 +392,12 @@
   </div>
 {/if}
 
+{#if shareOpen}
+  <div style={tokenStyle}>
+    <ShareSheet {ctrl} onClose={() => shareOpen = false} />
+  </div>
+{/if}
+
 {#if portal}
   <div class="portal" use:portalFade={portal} style={tokenStyle}>
     {#if portal.thumb}<img src={portal.thumb} alt="" />{/if}
@@ -426,6 +438,7 @@
   button.active { background: var(--accentQuiet); border-color: var(--accent); color: var(--text1); }
   .transport button.run { color: var(--text1); border-color: var(--hairlineStrong); }
   button.chip:not(:disabled) { color: var(--text1); }
+  button.share:not(:disabled) { color: var(--text1); }
 
   .speed { display: flex; align-items: center; gap: 7px; color: var(--text3); font-size: 12px; font-family: ui-monospace, monospace; }
   .speed input { width: 96px; }
