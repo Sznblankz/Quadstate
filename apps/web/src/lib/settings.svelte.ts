@@ -1,8 +1,11 @@
 /**
- * Per-device user settings (Settings overlay). Persisted to localStorage and
- * kept reactive via a Svelte 5 rune so components and the controller stay in
- * sync. Per-device only — there is no cloud sync (by design for this pass).
+ * User settings (Settings overlay). Persisted to localStorage (the immediate,
+ * always-available cache) and kept reactive via a Svelte 5 rune. When signed
+ * in, the blob also syncs to the cloud (`user_settings`): pulled on sign-in
+ * (cloud wins) and pushed, debounced, on each change.
  */
+import { supabase } from "./supabase.js";
+import { account } from "./account.svelte.js";
 
 export const APP_NAME = "QuadState";
 export const APP_VERSION = "0.1.0";
@@ -59,11 +62,53 @@ function persist(): void {
   try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch { /* full/blocked */ }
 }
 
-/** Update one setting and persist. */
+/** Update one setting and persist (locally, immediately; cloud, debounced). */
 export function setSetting<K extends keyof Settings>(key: K, value: Settings[K]): void {
   settings[key] = value;
   if (key === "reducedMotion") applyReducedMotion();
   persist();
+  pushCloud();
+}
+
+// ------------------------------------------------------------- cloud sync
+let pushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function upsertCloud(): void {
+  if (!supabase || account.status !== "signedIn" || !account.userId) return;
+  // PostgREST builders execute when `.then` is called; swallow errors (cloud
+  // settings are best-effort — the local cache is always authoritative offline).
+  supabase
+    .from("user_settings")
+    .upsert({ user_id: account.userId, settings: { ...settings }, updated_at: new Date().toISOString() })
+    .then(() => {}, () => {});
+}
+
+/** Debounced push of the whole settings blob to the signed-in user's row. */
+function pushCloud(): void {
+  if (!supabase || account.status !== "signedIn" || !account.userId) return;
+  if (pushTimer) clearTimeout(pushTimer);
+  pushTimer = setTimeout(upsertCloud, 600);
+}
+
+/** Pull the signed-in user's settings (cloud wins). If they have no row yet,
+ *  seed it from this device's settings. Call when auth flips to signed-in. */
+export async function pullCloudSettings(): Promise<void> {
+  if (!supabase || account.status !== "signedIn" || !account.userId) return;
+  const { data, error } = await supabase
+    .from("user_settings")
+    .select("settings")
+    .eq("user_id", account.userId)
+    .maybeSingle();
+  if (error) return;
+  const remote = (data as { settings: Partial<Settings> } | null)?.settings;
+  if (remote && typeof remote === "object") {
+    Object.assign(settings, { ...DEFAULTS, ...remote });
+    applyReducedMotion();
+    persist();
+  } else {
+    if (pushTimer) clearTimeout(pushTimer);
+    upsertCloud(); // first sign-in: seed the cloud row from local
+  }
 }
 
 /** True when the OS asks for reduced motion. */

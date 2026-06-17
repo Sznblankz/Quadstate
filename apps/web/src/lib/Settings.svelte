@@ -1,7 +1,8 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { settings, setSetting, APP_NAME, APP_VERSION, type WheelMode, type SpaceMode } from "./settings.svelte.js";
-  import { account, signIn, signOut, BACKEND_NEEDED } from "./account.svelte.js";
+  import { account, signInWithOAuth, signInWithMagicLink, signOut, ACCOUNT_ENABLED } from "./account.svelte.js";
+  import { migrateLocalProjects, localProjectCount } from "./projectStore.js";
 
   let { initialSection = "appearance", onClose }: {
     initialSection?: SectionId;
@@ -21,12 +22,32 @@
   // open, so capturing the initial value (not tracking it) is intentional.
   let active = $state<SectionId>(untrack(() => initialSection));
 
-  // Inline local-profile form for the Account section.
-  let nameField = $state(account.name);
-  let emailField = $state(account.email);
-  function doSignIn() {
-    if (!nameField.trim() && !emailField.trim()) return;
-    signIn(nameField, emailField);
+  // Account section: real (passwordless) auth + local-project import.
+  let emailField = $state("");
+  let magicSent = $state(false);
+  let authBusy = $state(false);
+  let authErr = $state("");
+  async function acctOAuth(provider: "google" | "github") {
+    authBusy = true; authErr = "";
+    const { error } = await signInWithOAuth(provider);
+    authBusy = false; if (error) authErr = error;
+  }
+  async function acctMagic() {
+    const email = emailField.trim();
+    if (!email) return;
+    authBusy = true; authErr = "";
+    const { error } = await signInWithMagicLink(email);
+    authBusy = false; if (error) authErr = error; else magicSent = true;
+  }
+
+  let importBusy = $state(false);
+  let importedMsg = $state("");
+  const hasLocalToImport = $derived(account.status === "signedIn" && localProjectCount() > 0);
+  async function importLocal() {
+    importBusy = true;
+    const n = await migrateLocalProjects();
+    importBusy = false;
+    importedMsg = n > 0 ? `Uploaded ${n} local project${n === 1 ? "" : "s"} to your account.` : "No local projects to upload.";
   }
 
   function clampInt(v: string, lo: number, hi: number, fallback: number): number {
@@ -153,28 +174,43 @@
           <h3>Account</h3>
           {#if account.status === "signedIn"}
             <div class="acct-card">
-              <div class="acct-status"><span class="dot on"></span> Signed in (local profile)</div>
+              <div class="acct-status"><span class="dot on"></span> Signed in</div>
               <div class="acct-row"><span>Name</span><b>{account.name || "—"}</b></div>
               <div class="acct-row"><span>Email</span><b>{account.email || "—"}</b></div>
               <button class="ghost" onclick={signOut}>Sign out</button>
             </div>
-          {:else}
+            <div class="acct-card">
+              <div class="acct-status">Local projects</div>
+              <p class="hint" style="margin-top:0">Upload projects saved on this device into your account so they sync everywhere. Local copies are kept.</p>
+              <button class="ghost" disabled={!hasLocalToImport || importBusy} onclick={importLocal}>
+                {importBusy ? "Uploading…" : "Import local projects"}
+              </button>
+              {#if importedMsg}<p class="hint" style="margin-top:0">{importedMsg}</p>{/if}
+            </div>
+          {:else if ACCOUNT_ENABLED}
             <div class="acct-card">
               <div class="acct-status"><span class="dot"></span> Guest — not signed in</div>
-              <p class="hint">Create a local profile so the app can show an identity. Stored on this device only.</p>
-              <label class="field"><span>Name</span>
-                <input bind:value={nameField} placeholder="Your name" spellcheck="false"
-                  onkeydown={(e) => { if (e.key === "Enter") doSignIn(); }} /></label>
-              <label class="field"><span>Email</span>
-                <input bind:value={emailField} placeholder="you@example.com" type="email" spellcheck="false"
-                  onkeydown={(e) => { if (e.key === "Enter") doSignIn(); }} /></label>
-              <button class="primary" onclick={doSignIn}>Sign in</button>
+              <p class="hint" style="margin-top:0">Sign in to sync your projects and settings across devices. No password — use a provider or a one-time email link.</p>
+              {#if magicSent}
+                <p class="hint" style="margin-top:0">Check your inbox — we emailed a sign-in link to <b>{emailField.trim()}</b>.</p>
+              {:else}
+                <div class="prov-col">
+                  <button class="ghost" disabled={authBusy} onclick={() => acctOAuth("google")}>Continue with Google</button>
+                  <button class="ghost" disabled={authBusy} onclick={() => acctOAuth("github")}>Continue with GitHub</button>
+                </div>
+                <label class="field"><span>Or email me a link</span>
+                  <input bind:value={emailField} placeholder="you@example.com" type="email" spellcheck="false"
+                    onkeydown={(e) => { if (e.key === "Enter") acctMagic(); }} /></label>
+                <button class="primary" disabled={authBusy || !emailField.trim()} onclick={acctMagic}>Send magic link</button>
+              {/if}
+              {#if authErr}<p class="hint" style="margin-top:0; color: var(--text1)">{authErr}</p>{/if}
+            </div>
+          {:else}
+            <div class="acct-card">
+              <div class="acct-status"><span class="dot"></span> Cloud not configured</div>
+              <p class="hint" style="margin-top:0">This build has no backend configured, so accounts and cloud sync are unavailable. Projects and settings are stored locally on this device.</p>
             </div>
           {/if}
-          <div class="callout">
-            <b>Real authentication not implemented.</b>
-            <span>{BACKEND_NEEDED}</span>
-          </div>
 
         {:else if active === "about"}
           <h3>About</h3>
@@ -183,10 +219,10 @@
             <div class="about-tag">A 4-state (0 / 1 / X / Z) digital logic simulator.</div>
             <div class="about-grid">
               <span>Version</span><b>{APP_VERSION}</b>
-              <span>Storage</span><b>Local (this device)</b>
+              <span>Storage</span><b>{ACCOUNT_ENABLED ? "Local + cloud (signed in)" : "Local (this device)"}</b>
               <span>Status</span><b>Prototype</b>
             </div>
-            <p class="hint">Settings and projects are stored locally per device. There is no cloud sync yet.</p>
+            <p class="hint">Guest projects and settings are stored locally per device. Sign in to sync them to your account across devices.</p>
           </div>
         {/if}
       </section>
@@ -259,6 +295,8 @@
   .acct-row { display: flex; align-items: baseline; gap: 12px; font-size: 13px; }
   .acct-row span { width: 56px; flex: 0 0 auto; color: var(--text3); font-size: 12px; }
   .acct-row b { color: var(--text1); font-weight: 500; }
+  .prov-col { display: flex; flex-direction: column; gap: 8px; }
+  .prov-col .ghost { align-self: stretch; text-align: center; }
   .field { display: flex; flex-direction: column; gap: 5px; }
   .field span { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--text3); text-transform: uppercase; }
   .field input { background: var(--surface1); color: var(--text1); border: 1px solid var(--hairline); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
@@ -269,10 +307,6 @@
   .ghost:hover { background: var(--surface3); color: var(--text1); }
   .primary { background: var(--accent); color: #fff; border: 1px solid var(--accent); font-weight: 600; }
   .primary:hover { background: var(--accentHover); }
-
-  .callout { margin-top: 16px; display: flex; flex-direction: column; gap: 4px; background: var(--surface2); border: 1px solid var(--hairline); border-left: 2px solid var(--hairlineStrong); border-radius: 10px; padding: 12px 14px; }
-  .callout b { font-size: 13px; color: var(--text1); }
-  .callout span { font-size: 12px; color: var(--text3); line-height: 1.5; }
 
   /* About */
   .about-name { font-size: 20px; font-weight: 700; color: var(--text1); letter-spacing: -0.02em; }

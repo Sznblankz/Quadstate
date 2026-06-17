@@ -12,9 +12,15 @@
   import HelpOverlay from "./lib/HelpOverlay.svelte";
   import ShareSheet from "./lib/ShareSheet.svelte";
   import { AppController, type UiState } from "./lib/controller.js";
-  import { listProjects, deleteProjectDraft, renameProjectDraft, type ProjectMeta } from "./lib/draft.js";
+  import {
+    listProjects, deleteProject as storeDelete, renameProject as storeRename,
+    needsMigration, migrateLocalProjects, markMigrated, localProjectCount,
+    type ProjectMeta,
+  } from "./lib/projectStore.js";
+  import { account, initAuth } from "./lib/account.svelte.js";
+  import { parseShareSlug, fetchSharedProject } from "./lib/share.js";
   import { type TemplateId } from "./lib/templates.js";
-  import { settings, applyReducedMotion, reduceMotionActive } from "./lib/settings.svelte.js";
+  import { settings, applyReducedMotion, reduceMotionActive, pullCloudSettings } from "./lib/settings.svelte.js";
 
   const ctrl = new AppController();
 
@@ -62,11 +68,70 @@
     setTimeout(() => (splashGone = true), 420);
   }
 
+  // --- Boot: real accounts + cloud. initAuth() hydrates the account from the
+  //     Supabase session; status changes re-load recents and pull settings.
+  initAuth();
+
   let view = $state<"home" | "editor">("home");
-  let recents = $state<ProjectMeta[]>(listProjects());
-  function goHome() { if (ui.editing) return; ctrl.flushDraft(); recents = listProjects(); view = "home"; }
+
+  // Recents: async (cloud when signed in, local otherwise). Re-loaded whenever
+  // the account status flips (sign-in/out swaps the backend) or after an edit.
+  let recents = $state<ProjectMeta[]>([]);
+  let recentsNonce = $state(0);
+  function refreshRecents() { recentsNonce++; }
+  $effect(() => {
+    account.status; recentsNonce; // deps: sign-in/out (backend swap) or manual refresh
+    let cancelled = false;
+    listProjects().then((list) => { if (!cancelled) recents = list; });
+    return () => { cancelled = true; };
+  });
+
+  // On sign-in: pull cloud settings, and offer to upload local projects once.
+  let migratePrompt = $state<{ count: number } | null>(null);
+  let prevStatus = account.status;
+  $effect(() => {
+    const status = account.status;
+    if (status === "signedIn" && prevStatus !== "signedIn") {
+      void pullCloudSettings();
+      const uid = account.userId;
+      if (uid && needsMigration(uid)) migratePrompt = { count: localProjectCount() };
+    }
+    prevStatus = status;
+  });
+  async function doMigrate() { await migrateLocalProjects(); migratePrompt = null; refreshRecents(); }
+  function skipMigrate() { if (account.userId) markMigrated(account.userId); migratePrompt = null; }
+
+  // --- Share route: `#/p/<slug>` opens a public circuit read-only, no account.
+  const shareSlug = typeof location !== "undefined" ? parseShareSlug(location.hash) : null;
+  let sharedName = $state<string | null>(null);
+  let shareError = $state(false);
+  if (shareSlug) {
+    view = "editor"; // skip Home; the editor shell shows while the circuit loads
+    void (async () => {
+      const proj = await fetchSharedProject(shareSlug);
+      if (proj && ctrl.loadSharedString(proj.name, proj.json)) sharedName = proj.name;
+      else shareError = true;
+    })();
+  }
+  function clearHash() { history.replaceState(null, "", location.pathname + location.search); }
+
+  async function goHome() {
+    if (ui.editing) return;
+    await ctrl.flushNow();
+    if (sharedName !== null || shareError) { sharedName = null; shareError = false; clearHash(); }
+    refreshRecents();
+    view = "home";
+  }
   function goNew() { preloadedId = null; ctrl.startNewProject(); view = "editor"; }
   function openTemplate(id: TemplateId) { preloadedId = null; ctrl.openTemplate(id); view = "editor"; }
+
+  /** Turn the read-only shared view into an editable copy in the account. */
+  async function duplicateShared() {
+    await ctrl.duplicateShared();
+    sharedName = null; clearHash();
+    refreshRecents();
+  }
+  function dismissShareError() { shareError = false; clearHash(); view = "home"; }
 
   // --- Home → Editor reveal: the REAL editor mounts immediately (preloaded on
   //     hover) and is masked with an expanding clip-path that morphs from the
@@ -89,15 +154,15 @@
     if (preloadTimer) clearTimeout(preloadTimer);
     preloadTimer = setTimeout(() => {
       if (preloadedId === id) return;
-      if (ctrl.openProjectDraft(id)) preloadedId = id;
+      void ctrl.openProjectDraft(id).then((ok) => { if (ok) preloadedId = id; });
     }, 90);
   }
 
-  function openRecent(id: string, origin?: DOMRect) {
+  async function openRecent(id: string, origin?: DOMRect) {
     if (preloadTimer) { clearTimeout(preloadTimer); preloadTimer = null; }
     // Reuse the preloaded project if it's this one; otherwise load it now.
     if (preloadedId !== id) {
-      if (!ctrl.openProjectDraft(id)) return;
+      if (!(await ctrl.openProjectDraft(id))) return;
       preloadedId = id;
     }
     if (reduceMotion || !origin) { view = "editor"; return; } // instant, no reveal
@@ -133,8 +198,8 @@
     return { destroy() { revealAnim?.cancel(); revealAnim = null; } };
   }
 
-  function renameProject(id: string, name: string) { renameProjectDraft(id, name); recents = listProjects(); }
-  function deleteProject(id: string) { deleteProjectDraft(id); recents = listProjects(); }
+  async function renameProject(id: string, name: string) { await storeRename(id, name); refreshRecents(); }
+  async function deleteProject(id: string) { await storeDelete(id); refreshRecents(); }
 
   // The single token source (packages/canvas) mirrored onto CSS variables so
   // chrome and canvas never drift. var(--surface1), var(--accent), etc.
@@ -278,27 +343,27 @@
     <div class="spacer"></div>
 
     <div class="seg">
-      <button disabled={!ui.canUndo || ui.diving} onclick={() => ctrl.undo()}>Undo</button>
-      <button disabled={!ui.canRedo || ui.diving} onclick={() => ctrl.redo()}>Redo</button>
-      <button disabled={ui.diving} onclick={() => ctrl.deleteSelection()}>Delete</button>
-      <button class="chip" disabled={!ui.canCreateChip || ui.diving} onclick={createChip}
+      <button disabled={!ui.canUndo || ui.diving || ui.readOnly} onclick={() => ctrl.undo()}>Undo</button>
+      <button disabled={!ui.canRedo || ui.diving || ui.readOnly} onclick={() => ctrl.redo()}>Redo</button>
+      <button disabled={ui.diving || ui.readOnly} onclick={() => ctrl.deleteSelection()}>Delete</button>
+      <button class="chip" disabled={!ui.canCreateChip || ui.diving || ui.readOnly} onclick={createChip}
         title="Create a chip from the selected parts (Ctrl+G)">Create Chip</button>
     </div>
     <div class="seg">
-      <button class="iconbtn" disabled={ui.editing != null} onclick={() => ctrl.saveProject()}>
+      <button class="iconbtn" disabled={ui.editing != null || ui.readOnly} onclick={() => ctrl.saveProject()}>
         <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h10l4 4v12H5z"/><path d="M8 4v5h6V4"/><path d="M8 13h8v6H8z"/></svg>
         Save
       </button>
-      <button class="iconbtn" disabled={ui.editing != null} onclick={() => ctrl.openProject()}>
+      <button class="iconbtn" disabled={ui.editing != null || ui.readOnly} onclick={() => ctrl.openProject()}>
         <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/></svg>
         Open
       </button>
-      <button class="iconbtn" disabled={ui.editing != null} onclick={() => ctrl.importChip()}
+      <button class="iconbtn" disabled={ui.editing != null || ui.readOnly} onclick={() => ctrl.importChip()}
         title="Import a shared chip bundle into the palette">
         <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
         Import
       </button>
-      <button class="iconbtn share" disabled={ui.editing != null} onclick={() => shareOpen = true}
+      <button class="iconbtn share" disabled={ui.editing != null || ui.readOnly} onclick={() => shareOpen = true}
         title="Share / export this circuit">
         <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="12" r="2.4"/><circle cx="17" cy="6" r="2.4"/><circle cx="17" cy="18" r="2.4"/><path d="M8.1 10.9l6.8-3.8"/><path d="M8.1 13.1l6.8 3.8"/></svg>
         Share
@@ -320,6 +385,16 @@
     <main>
       <div class="canvas-region">
         <CanvasHost {ctrl} />
+        {#if ui.readOnly}
+          <div class="shared-banner" role="status">
+            <span><b>Shared circuit</b> — read-only. Run it, explore it, toggle inputs.</span>
+            {#if account.status === "signedIn"}
+              <button class="dup" onclick={duplicateShared}>Save a copy to my projects</button>
+            {:else}
+              <span class="dup-hint">Sign in to save your own copy.</span>
+            {/if}
+          </div>
+        {/if}
         {#if ui.placePart}
           <div class="stamp-banner">Stamping <b>{stampLabel(ui.placePart)}</b> — click to place, Esc to stop</div>
         {/if}
@@ -439,6 +514,31 @@
 {#if shareOpen}
   <div style={tokenStyle}>
     <ShareSheet {ctrl} onClose={() => shareOpen = false} />
+  </div>
+{/if}
+
+{#if migratePrompt}
+  <div class="modal-scrim" style={tokenStyle}>
+    <div class="mini-modal" role="dialog" aria-modal="true" aria-label="Move local projects to your account">
+      <h2>Bring your projects with you?</h2>
+      <p>You have {migratePrompt.count} project{migratePrompt.count === 1 ? "" : "s"} saved on this device. Upload {migratePrompt.count === 1 ? "it" : "them"} to your account so {migratePrompt.count === 1 ? "it follows" : "they follow"} you across devices? Your local cop{migratePrompt.count === 1 ? "y stays" : "ies stay"} here too.</p>
+      <div class="mini-actions">
+        <button class="ghost" onclick={skipMigrate}>Not now</button>
+        <button class="primary" onclick={doMigrate}>Upload</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if shareError}
+  <div class="modal-scrim" style={tokenStyle}>
+    <div class="mini-modal" role="dialog" aria-modal="true" aria-label="Shared link unavailable">
+      <h2>Link unavailable</h2>
+      <p>This shared circuit doesn’t exist, isn’t public anymore, or the link is incomplete.</p>
+      <div class="mini-actions">
+        <button class="primary" onclick={dismissShareError}>Go to QuadState</button>
+      </div>
+    </div>
   </div>
 {/if}
 
@@ -585,6 +685,45 @@
     background: var(--surface1); color: var(--text1); border: 1px solid var(--accent);
     border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 12px;
   }
+
+  /* Read-only shared-circuit banner (top-centre, like the dive-refusal hint). */
+  .shared-banner {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6;
+    display: flex; align-items: center; gap: 12px; max-width: min(720px, 84%);
+    background: var(--surface2); border: 1px solid var(--hairlineStrong);
+    border-radius: 10px; padding: 7px 8px 7px 14px; font-size: 13px; color: var(--text2);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+  }
+  .shared-banner b { color: var(--text1); font-weight: 600; }
+  .dup {
+    background: var(--accent); color: #fff; border: 1px solid var(--accent);
+    border-radius: 8px; padding: 5px 12px; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600;
+    white-space: nowrap;
+  }
+  .dup:hover { background: var(--accentHover); }
+  .dup-hint { color: var(--text3); font-size: 12px; white-space: nowrap; }
+
+  /* Small centred modal (project migration prompt / shared-link error). */
+  .modal-scrim {
+    position: fixed; inset: 0; z-index: 130; display: grid; place-items: center; padding: 24px;
+    background: rgba(5,6,9,0.62); backdrop-filter: blur(2px);
+  }
+  .mini-modal {
+    width: min(440px, 100%); background: var(--surface1);
+    border: 1px solid var(--hairlineStrong); border-radius: 14px; padding: 22px 22px 18px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.55); color: var(--text1);
+    animation: pop .16s cubic-bezier(.2,.7,.2,1) both;
+  }
+  @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.99); } to { opacity: 1; transform: none; } }
+  .mini-modal h2 { margin: 0 0 8px; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .mini-modal p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text2); }
+  .mini-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .mini-actions button { border-radius: 8px; padding: 8px 16px; font: inherit; font-size: 13px; cursor: pointer; border: 1px solid var(--hairline); }
+  .mini-actions .ghost { background: var(--surface2); color: var(--text2); }
+  .mini-actions .ghost:hover { background: var(--surface3); color: var(--text1); }
+  .mini-actions .primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .mini-actions .primary:hover { background: var(--accentHover); }
+  :global([data-reduced-motion="1"]) .mini-modal { animation: none; }
 
   .splash-wrap { position: fixed; inset: 0; z-index: 200; transition: opacity .4s ease; }
   .splash-wrap.fade { opacity: 0; pointer-events: none; }

@@ -2,7 +2,7 @@
   import { TOKENS } from "@logicsim/canvas";
   import BrandMark from "./BrandMark.svelte";
   import AccountMenu from "./AccountMenu.svelte";
-  import { loadProjectDraft, type ProjectMeta } from "./draft.js";
+  import { loadProject, type ProjectMeta } from "./projectStore.js";
   import { renderThumbnail } from "./thumbnail.js";
   import { TEMPLATES, templateProjectJson, type TemplateId } from "./templates.js";
   import { reduceMotionActive } from "./settings.svelte.js";
@@ -33,17 +33,23 @@
   const resumeList = $derived(recents.slice(0, 3));
 
   // Thumbnails are rendered from each project's saved circuit and memoised by
-  // id+savedAt, so a re-saved project re-renders but list shuffles don't.
+  // id+savedAt, so a re-saved project re-renders but list shuffles don't. Loads
+  // are async (cloud projects are network I/O), so the cache is reactive: the
+  // dotted placeholder shows until the data URL resolves, then it swaps in.
   const THUMB_W = 360, THUMB_H = 200;
-  const thumbCache = new Map<string, string | null>();
+  let thumbCache = $state<Record<string, string | null>>({});
+  const thumbStarted = new Set<string>();
   function thumbFor(p: ProjectMeta): string | null {
     const key = `${p.id}:${p.savedAt}`;
-    const hit = thumbCache.get(key);
-    if (hit !== undefined) return hit;
-    const d = loadProjectDraft(p.id);
-    const url = d ? renderThumbnail(d.json, THUMB_W, THUMB_H) : null;
-    thumbCache.set(key, url);
-    return url;
+    const cached = thumbCache[key];
+    if (cached !== undefined) return cached; // resolved (url or null)
+    if (!thumbStarted.has(key)) {
+      thumbStarted.add(key);
+      void loadProject(p.id).then((d) => {
+        thumbCache[key] = d ? renderThumbnail(d.json, THUMB_W, THUMB_H) : null;
+      });
+    }
+    return null; // placeholder until the load resolves
   }
 
   // Template previews — rendered once from each template's own circuit, memoised.

@@ -21,7 +21,7 @@ import { definitionFromInterior } from "./editdef.js";
 import { buildTemplate, TEMPLATES, type TemplateId } from "./templates.js";
 import { SimBridge } from "./sim/bridge.js";
 import { detectStorage } from "./storage.js";
-import { saveProjectDraft, loadProjectDraft, newProjectId } from "./draft.js";
+import { isCloudActive, loadProject, newProjectId, saveProject } from "./projectStore.js";
 
 /** Stable, persistable key for a tracked signal (wire id or probe path). */
 function trackKey(t: TrackedSignal): string {
@@ -83,6 +83,8 @@ export interface UiState {
   pendingWidth: number | null;
   /** Inline chip-rename field (screen coords over the canvas). */
   rename: { componentId: number; partId: string; name: string; sx: number; sy: number } | null;
+  /** Viewing a public shared circuit read-only (no editing / autosave). */
+  readOnly: boolean;
 }
 
 /** Framework-free application controller; App.svelte is a thin shell. */
@@ -401,6 +403,12 @@ export class AppController {
       this.dirtySignals = true;
       return;
     }
+    if (this.readOnlyMode) {
+      // Shared read-only view: pan/zoom (above) plus taps (poke inputs, select,
+      // double-tap to dive) are allowed; drags would move/wire/box-select, so
+      // they're dropped. The circuit stays explorable and runnable, not editable.
+      if (intent.type !== "tap") return;
+    }
     if (this.diving) {
       // Live-instance interior is READ-ONLY: only double-tap (dive deeper)
       // navigates. A drag on a part/port is an edit attempt -> neutral refusal.
@@ -436,6 +444,12 @@ export class AppController {
     const t = e.target as HTMLElement | null;
     if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement ||
       (t !== null && t.isContentEditable)) return;
+    if (this.readOnlyMode) {
+      // Read-only shared view: only run/pause (Space) is available; all edit
+      // shortcuts (delete, undo/redo, create chip) are swallowed.
+      if (e.key === " ") { e.preventDefault(); if (!e.repeat) this.toggleRunning(); }
+      return;
+    }
     if (this.proto && this.protoKey(e)) return;
     if (this.diving) {
       // Read-only live instance: Esc surfaces, edits are refused, the global
@@ -1179,36 +1193,60 @@ export class AppController {
 
   // ------------------------------------------------------------ P1/P11a: projects
   projectName = "Untitled circuit";
-  /** Which local project slot autosave writes to (one per recent). */
+  /** Which project autosave writes to — a localStorage slot (guest) or a cloud
+   *  row id (signed in). Empty when there is no active writable project. */
   private projectId = "";
+  /** Read-only shared view (opened from a public `#/p/<slug>` link): the doc is
+   *  loaded for viewing only — editing and autosave are suppressed. */
+  private readOnlyMode = false;
   private draftTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Latched once a local save fails, so the warning surfaces once rather than
-   *  on every 400ms autosave; cleared when a save next succeeds. */
+  /** Latched once a save fails, so the warning surfaces once rather than on
+   *  every autosave; cleared when a save next succeeds. */
   private draftSaveFailed = false;
+  /** Last successfully persisted serialization — skips redundant writes (the
+   *  cloud write-amplification guard). */
+  private lastFlushedJson: string | null = null;
 
-  /** Debounced autosave of the working project to its slot. */
+  /** The active project's id (cloud row / local slot), or "" when none. */
+  get currentProjectId(): string { return this.projectId; }
+  /** Viewing a public shared circuit read-only. */
+  get readOnly(): boolean { return this.readOnlyMode; }
+
+  /** Debounced autosave of the working project. The cloud uses a slower cadence
+   *  (network writes) than the immediate local store. */
   private autosaveDraft(): void {
-    if (this.editing || !this.projectId) return; // blueprint / no active project
+    if (this.editing || !this.projectId || this.readOnlyMode) return;
     if (this.draftTimer) clearTimeout(this.draftTimer);
-    this.draftTimer = setTimeout(() => this.flushDraft(), 400);
+    const delay = isCloudActive() ? 1500 : 400;
+    this.draftTimer = setTimeout(() => { void this.flushNow(); }, delay);
   }
 
-  /** Persist the current project immediately (before switching / on unload). */
-  flushDraft(): void {
-    if (this.editing || !this.projectId) return;
+  /** Persist immediately, fire-and-forget. The guest (localStorage) write runs
+   *  synchronously within the call, so this is safe from `beforeunload`; a cloud
+   *  write is dispatched but may not complete before the page goes away. */
+  flushDraft(): void { void this.flushNow(); }
+
+  /** Persist the current project and resolve once the write settles. */
+  async flushNow(): Promise<void> {
+    if (this.editing || !this.projectId || this.readOnlyMode) return;
     if (this.draftTimer) { clearTimeout(this.draftTimer); this.draftTimer = null; }
+    let json: string;
+    try { json = this.serializeProject(); }
+    catch { return; } // serializeProject itself threw — nothing safe to save
+    if (json === this.lastFlushedJson) return; // unchanged since last save
     let ok = false;
-    try { ok = saveProjectDraft(this.projectId, this.projectName, this.serializeProject()); }
-    catch { ok = false; } // serializeProject itself threw
-    if (!ok && !this.draftSaveFailed) {
-      // Surface the first failure (storage full / blocked) once — silent
-      // autosave loss is the worst outcome. Don't repeat it every autosave.
+    try { ok = await saveProject(this.projectId, this.projectName, json); }
+    catch { ok = false; }
+    if (ok) {
+      this.lastFlushedJson = json;
+      this.draftSaveFailed = false; // recovered; allow a future failure to show
+    } else if (!this.draftSaveFailed) {
+      // Surface the first failure (storage full / blocked / offline) once —
+      // silent autosave loss is the worst outcome. Don't repeat every autosave.
       this.draftSaveFailed = true;
-      this.status = "couldn't save locally — storage may be full or blocked";
+      this.status = "couldn't save — storage or network may be unavailable";
       this.statusOk = false;
       this.pushUi();
-    } else if (ok) {
-      this.draftSaveFailed = false; // recovered; allow a future failure to show
     }
   }
 
@@ -1229,27 +1267,61 @@ export class AppController {
   /** New blank project in its OWN slot (older projects are kept). */
   startNewProject(): void {
     this.flushDraft();
+    this.readOnlyMode = false;
     this.projectId = newProjectId();
+    this.lastFlushedJson = null;
     this.newProject("Untitled circuit");
     this.bridge.setRunning(this.startLive); // Settings → Start live on open
     this.flushDraft(); // register in recents right away
   }
 
   /** Open an existing recent project by id. Returns true on success. */
-  openProjectDraft(id: string): boolean {
-    this.flushDraft();
-    const d = loadProjectDraft(id);
+  async openProjectDraft(id: string): Promise<boolean> {
+    await this.flushNow();
+    const d = await loadProject(id);
     if (!d) return false;
+    this.readOnlyMode = false;
     this.projectId = id;
     this.projectName = d.name;
     this.tracked = [];
     this.whyWireId = null;
     const ok = this.loadProjectString(d.json) === null;
     if (ok) {
+      // We just loaded this content — record it so the post-load autosave
+      // (scheduled by recompile) doesn't immediately rewrite an identical blob.
+      this.lastFlushedJson = this.serializeProject();
       this.fitOnOpen();
       this.bridge.setRunning(this.startLive); // Settings → Start live on open
     }
     return ok;
+  }
+
+  /** Load a public shared project read-only (from a `#/p/<slug>` link). It is
+   *  not owned by the viewer, so there is no writable slot and autosave is off. */
+  loadSharedString(name: string, json: string): boolean {
+    this.flushDraft();          // persist any outgoing project first
+    this.readOnlyMode = true;
+    this.projectId = "";
+    this.projectName = name;
+    this.tracked = [];
+    this.whyWireId = null;
+    const ok = this.loadProjectString(json) === null;
+    if (ok) {
+      this.fitOnOpen();
+      this.bridge.setRunning(true); // shared circuits open running, like examples
+    }
+    this.pushUi();
+    return ok;
+  }
+
+  /** Turn the read-only shared view into an owned copy (a fresh project), so the
+   *  viewer can edit and keep it. Resolves once the copy is saved. */
+  async duplicateShared(): Promise<void> {
+    this.readOnlyMode = false;
+    this.projectId = newProjectId();
+    this.lastFlushedJson = null;
+    await this.flushNow();
+    this.pushUi();
   }
 
   /** Request a fit-to-view for a freshly opened project. openProjectDraft /
@@ -1517,7 +1589,9 @@ export class AppController {
   openTemplate(id: TemplateId): void {
     if (this.editing) return; // not while editing a blueprint
     this.flushDraft();
+    this.readOnlyMode = false;
     this.projectId = newProjectId();
+    this.lastFlushedJson = null;
     this.newProject(TEMPLATES.find((t) => t.id === id)?.label ?? "Example");
     const libId = (name: string): string => this.libraryParts.find((p) => p.name === name)?.id ?? "";
     const trackedWires = buildTemplate(id, this.doc, this.history, this.selection, libId);
@@ -1802,6 +1876,7 @@ export class AppController {
       editing: this.editing ? { name: this.editName, instances: this.editInstanceCount } : null,
       pendingWidth: this.pendingWidth,
       rename,
+      readOnly: this.readOnlyMode,
     });
   }
 }
