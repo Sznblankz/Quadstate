@@ -12,7 +12,8 @@
   import HelpOverlay from "./lib/HelpOverlay.svelte";
   import ShareSheet from "./lib/ShareSheet.svelte";
   import { AppController, type UiState } from "./lib/controller.js";
-  import { listProjects, deleteProjectDraft, renameProjectDraft, type ProjectMeta } from "./lib/draft.js";
+  import { listProjects, deleteProjectDraft, renameProjectDraft, loadProjectDraft, type ProjectMeta } from "./lib/draft.js";
+  import { renderCircuitPng } from "./lib/thumbnail.js";
   import { type TemplateId } from "./lib/templates.js";
   import { settings, applyReducedMotion, reduceMotionActive } from "./lib/settings.svelte.js";
 
@@ -68,36 +69,73 @@
   function goNew() { ctrl.startNewProject(); view = "editor"; }
   function openTemplate(id: TemplateId) { ctrl.openTemplate(id); view = "editor"; }
 
-  // --- Home → Editor: mount the editor normally (the controller fits the
-  //     circuit to the canvas robustly, once the canvas has real dimensions).
-  //     The transition is a SAFE overlay only — a thumbnail that lifts and
-  //     dissolves over the clicked card. It never touches the canvas, viewport,
-  //     or layout, so it can't break editor positioning.
-  let portal = $state<{ x: number; y: number; w: number; h: number; thumb: string | null } | null>(null);
+  // --- Home → Editor "portal": mount the editor normally (the controller fits
+  //     the circuit to the canvas robustly, once the canvas has real dimensions).
+  //     The transition is a SAFE overlay only — a fixed image that grows from the
+  //     clicked card into the editor's canvas area and dissolves into the live,
+  //     already-fit editor. It never touches the canvas, viewport, or layout, so
+  //     it can't break editor positioning.
+  type Rect = { x: number; y: number; w: number; h: number };
+  let portal = $state<{ from: Rect; to: Rect; img: string | null } | null>(null);
+  let canvasRegionEl = $state<HTMLElement>();
+
+  // Crisp, fit-to-content portal images, preloaded on card hover and keyed by
+  // id:savedAt (mirrors HomeView's thumb cache) so the click is instant.
+  const portalImgCache = new Map<string, string | null>();
+  const portalKey = (id: string) => `${id}:${recents.find((r) => r.id === id)?.savedAt ?? 0}`;
+  function renderPortalImg(id: string): string | null {
+    const key = portalKey(id);
+    const hit = portalImgCache.get(key);
+    if (hit !== undefined) return hit;
+    const d = loadProjectDraft(id);
+    const img = d ? renderCircuitPng(d.json, { target: 1600, pad: 48, dpr: 2 }) : null;
+    portalImgCache.set(key, img);
+    return img;
+  }
+  function onPreload(id: string) {
+    if (portalImgCache.has(portalKey(id))) return;
+    const run = () => renderPortalImg(id);
+    const ric = (window as Window & { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback;
+    if (ric) ric(run); else setTimeout(run, 0);
+  }
+
   function openRecent(id: string, origin?: DOMRect, thumb?: string | null) {
     if (!ctrl.openProjectDraft(id)) return; // preload + (robustly) fit the project
     view = "editor";
-    if (reduceMotion || !origin) return;
-    portal = { x: origin.left, y: origin.top, w: origin.width, h: origin.height, thumb: thumb ?? null };
-    setTimeout(() => { portal = null; }, 380);
+    if (reduceMotion || !origin) return; // instant switch, no portal
+    const img = renderPortalImg(id) ?? thumb ?? null;
+    const from: Rect = { x: origin.left, y: origin.top, w: origin.width, h: origin.height };
+    // Measure the editor's canvas region after it mounts (one frame), so the
+    // image grows into exactly where the live circuit will appear.
+    requestAnimationFrame(() => {
+      const r = canvasRegionEl?.getBoundingClientRect();
+      const to: Rect = r && r.width > 0
+        ? { x: r.left, y: r.top, w: r.width, h: r.height }
+        : { x: 200, y: 56, w: window.innerWidth - 420, h: window.innerHeight - 256 }; // chrome-minus fallback
+      portal = { from, to, img };
+      setTimeout(() => { portal = null; }, 640);
+    });
   }
 
-  /** Action: a quiet card→editor dissolve. The thumbnail overlay sits over the
-   *  clicked card, lifts slightly toward centre while scaling a touch, and
-   *  fades out early — revealing the already-fit live editor. It's a separate
-   *  fixed element, so it has zero effect on canvas size / viewport / layout. */
-  function portalFade(node: HTMLElement, p: { x: number; y: number; w: number; h: number }) {
-    node.style.left = `${p.x}px`; node.style.top = `${p.y}px`;
-    node.style.width = `${p.w}px`; node.style.height = `${p.h}px`;
-    const dx = (window.innerWidth / 2 - (p.x + p.w / 2)) * 0.16;
-    const dy = (window.innerHeight / 2 - (p.y + p.h / 2)) * 0.16;
+  /** Action: the card→editor "portal". A fixed image starts on the clicked card
+   *  and grows (uniform, undistorted) into the editor's canvas rect, holding
+   *  opacity until a short late dissolve reveals the already-fit live editor.
+   *  It's a separate fixed element, so it has zero effect on canvas / viewport /
+   *  layout. */
+  function portalGrow(node: HTMLElement, p: { from: Rect; to: Rect }) {
+    const { from, to } = p;
+    node.style.left = `${from.x}px`; node.style.top = `${from.y}px`;
+    node.style.width = `${from.w}px`; node.style.height = `${from.h}px`;
+    const s = Math.min(to.w / from.w, to.h / from.h); // contain — never distort
+    const dx = (to.x + to.w / 2) - (from.x + from.w / 2);
+    const dy = (to.y + to.h / 2) - (from.y + from.h / 2);
     const anim = node.animate(
       [
         { transform: "translate(0px,0px) scale(1)", opacity: 1, offset: 0 },
-        { transform: `translate(${dx * 0.7}px,${dy * 0.7}px) scale(1.08)`, opacity: 0, offset: 0.7 },
-        { transform: `translate(${dx}px,${dy}px) scale(1.14)`, opacity: 0, offset: 1 },
+        { transform: `translate(${dx}px,${dy}px) scale(${s})`, opacity: 1, offset: 0.72 },
+        { transform: `translate(${dx}px,${dy}px) scale(${s})`, opacity: 0, offset: 1 },
       ],
-      { duration: 360, easing: "cubic-bezier(.4,0,.2,1)", fill: "forwards" },
+      { duration: 560, easing: "cubic-bezier(.22,.9,.18,1)", fill: "forwards" },
     );
     return { destroy() { anim.cancel(); } };
   }
@@ -199,7 +237,7 @@
 {#if booted}
 {#if view === "home"}
   <HomeView {recents} onNew={goNew} onOpen={openRecent} onTemplate={openTemplate}
-    onRename={renameProject} onDelete={deleteProject} onOpenSettings={openSettings} />
+    onRename={renameProject} onDelete={deleteProject} onOpenSettings={openSettings} onPreload={onPreload} />
 {:else}
 <div class="app" style={tokenStyle}>
   <header>
@@ -274,7 +312,7 @@
     <Palette {ctrl} placePart={ui.placePart} libraryParts={ui.libraryParts} userParts={ui.userParts} />
 
     <main>
-      <div class="canvas-region">
+      <div class="canvas-region" bind:this={canvasRegionEl}>
         <CanvasHost {ctrl} />
         {#if ui.placePart}
           <div class="stamp-banner">Stamping <b>{stampLabel(ui.placePart)}</b> — click to place, Esc to stop</div>
@@ -399,8 +437,8 @@
 {/if}
 
 {#if portal}
-  <div class="portal" use:portalFade={portal} style={tokenStyle}>
-    {#if portal.thumb}<img src={portal.thumb} alt="" />{/if}
+  <div class="portal" use:portalGrow={portal} style={tokenStyle}>
+    {#if portal.img}<img src={portal.img} alt="" />{/if}
   </div>
 {/if}
 
@@ -557,5 +595,5 @@
     box-shadow: 0 18px 50px rgba(0,0,0,0.45);
     will-change: transform, opacity; pointer-events: none;
   }
-  .portal img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .portal img { width: 100%; height: 100%; object-fit: contain; display: block; }
 </style>

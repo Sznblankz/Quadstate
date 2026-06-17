@@ -7,7 +7,7 @@
   import { TEMPLATES, templateProjectJson, type TemplateId } from "./templates.js";
   import { reduceMotionActive } from "./settings.svelte.js";
 
-  let { recents, onNew, onOpen, onTemplate, onRename, onDelete, onOpenSettings }: {
+  let { recents, onNew, onOpen, onTemplate, onRename, onDelete, onOpenSettings, onPreload }: {
     recents: ProjectMeta[];
     onNew: () => void;
     /** Opens a project; `origin`/`thumb` seed the zoom-portal transition. */
@@ -16,6 +16,8 @@
     onRename: (id: string, name: string) => void;
     onDelete: (id: string) => void;
     onOpenSettings: (section?: "account") => void;
+    /** Hover hint: warm the crisp portal image for this project so the open is instant. */
+    onPreload: (id: string) => void;
   } = $props();
 
   const tokenStyle = Object.entries(TOKENS).map(([k, v]) => `--${k}: ${v}`).join(";");
@@ -218,7 +220,7 @@
                   </div>
 
                   {#if renamingId !== p.id && confirmId !== p.id}
-                    <button class="card-open" aria-label="Open {p.name}" onclick={(e) => open(p.id, e)}></button>
+                    <button class="card-open" aria-label="Open {p.name}" onpointerenter={() => onPreload(p.id)} onclick={(e) => open(p.id, e)}></button>
                   {/if}
 
                   {#if confirmId === p.id}
@@ -268,7 +270,7 @@
         {@const fthumb = thumbFor(feat)}
         <div class="continue">
           <span class="eyebrow">CONTINUE</span>
-          <button class="action resume" onclick={(e) => open(feat.id, e)}>
+          <button class="action resume" onpointerenter={() => onPreload(feat.id)} onclick={(e) => open(feat.id, e)}>
             <span class="thumb resume-thumb" class:has={!!fthumb}>
               {#if fthumb}<img src={fthumb} alt="" draggable="false" />{/if}
             </span>
@@ -277,7 +279,7 @@
           </button>
           {#each resumeList.slice(1) as p (p.id)}
             {@const rthumb = thumbFor(p)}
-            <button class="resume-row" onclick={(e) => open(p.id, e)}>
+            <button class="resume-row" onpointerenter={() => onPreload(p.id)} onclick={(e) => open(p.id, e)}>
               <span class="thumb row-thumb" class:has={!!rthumb}>
                 {#if rthumb}<img src={rthumb} alt="" draggable="false" />{/if}
               </span>
