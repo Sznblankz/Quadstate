@@ -42,8 +42,20 @@ describe("mergeBusTransitions", () => {
     expect(trans.every((t) => t.tick >= 3)).toBe(true);
   });
 
-  it("returns empty when any bit has no history yet", () => {
-    const h = hist({ 0: [{ tick: 0, value: 0 }], 1: [] });
+  it("degrades from the bits that have history when others don't (no blank lane)", () => {
+    // bit 1 was never recorded; the lane is built from bit 0 alone, so its
+    // 0->1 edge still shows through instead of blanking the whole bus.
+    const h = hist({
+      0: [{ tick: 0, value: 0 }, { tick: 10, value: 1 }],
+      1: [],
+    });
+    const { trans, oldestTick } = mergeBusTransitions([0, 1], h, agg);
+    expect(oldestTick).toBe(0);
+    expect(trans).toEqual([{ tick: 0, value: 0 }, { tick: 10, value: 1 }]);
+  });
+
+  it("returns empty only when NO bit has any history", () => {
+    const h = hist({ 0: [], 1: [] });
     expect(mergeBusTransitions([0, 1], h, agg)).toEqual({ trans: [], oldestTick: 0 });
   });
 

@@ -10,6 +10,14 @@ import type { Transition } from "@logicsim/engine";
  * where one bit's buffer starts but another's hasn't. A transition is emitted
  * only when the aggregate value actually changes.
  *
+ * If SOME bits have no recorded history yet (e.g. the brief window after a
+ * recompile before every bit's first trace delta lands), we degrade gracefully:
+ * the lane is built from the bits that DO have history instead of blanking the
+ * whole bus. The aggregate is then over a subset of the bus, so it can read as a
+ * confident 0/1 while an unrecorded bit is still unknown — an acceptable, clearly
+ * transient trade-off versus a flickering empty lane. Only an entirely
+ * history-less bus returns empty.
+ *
  * `oldestTick` is that horizon: history before it is not authoritative.
  */
 export function mergeBusTransitions(
@@ -17,8 +25,8 @@ export function mergeBusTransitions(
   hist: Map<number, Transition[]>,
   aggregate: (bits: number[]) => number,
 ): { trans: Transition[]; oldestTick: number } {
-  const series = nets.map((n) => hist.get(n) ?? []);
-  if (series.length === 0 || series.some((s) => s.length === 0)) {
+  const series = nets.map((n) => hist.get(n) ?? []).filter((s) => s.length > 0);
+  if (series.length === 0) {
     return { trans: [], oldestTick: 0 };
   }
 
