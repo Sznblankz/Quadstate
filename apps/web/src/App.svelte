@@ -65,58 +65,72 @@
   let view = $state<"home" | "editor">("home");
   let recents = $state<ProjectMeta[]>(listProjects());
   function goHome() { if (ui.editing) return; ctrl.flushDraft(); recents = listProjects(); view = "home"; }
-  function goNew() { ctrl.startNewProject(); view = "editor"; }
-  function openTemplate(id: TemplateId) { ctrl.openTemplate(id); view = "editor"; }
+  function goNew() { preloadedId = null; ctrl.startNewProject(); view = "editor"; }
+  function openTemplate(id: TemplateId) { preloadedId = null; ctrl.openTemplate(id); view = "editor"; }
 
-  // --- Home → Editor "portal": mount the editor normally (the controller fits
-  //     the circuit to the canvas robustly, once the canvas has real dimensions).
-  //     The transition is a SAFE overlay only — a clone of the clicked CARD (its
-  //     thumbnail + name) that grows from the card into the editor's canvas area
-  //     and dissolves into the live, already-fit editor. It never touches the
-  //     canvas, viewport, or layout, so it can't break editor positioning.
+  // --- Home → Editor reveal: the REAL editor mounts immediately (preloaded on
+  //     hover) and is masked with an expanding clip-path that morphs from the
+  //     clicked card's rect into the full editor. The transition therefore
+  //     always shows the live, sharp canvas — never a scaled screenshot. The
+  //     editor is full-size and fits itself the whole time (only the visible
+  //     window grows), so the circuit never re-fits, blurs, or pops.
   type Rect = { x: number; y: number; w: number; h: number };
-  let portal = $state<{ from: Rect; to: Rect; thumb: string | null; name: string } | null>(null);
-  let canvasRegionEl = $state<HTMLElement>();
+  let transitioning = $state(false);
+  let revealRect = $state<Rect | null>(null);
+  let preloadedId: string | null = null;
+  let preloadTimer: ReturnType<typeof setTimeout> | null = null;
+  let revealTimer: ReturnType<typeof setTimeout> | null = null;
+  let revealAnim: Animation | null = null;
 
-  function openRecent(id: string, origin?: DOMRect, thumb?: string | null) {
-    if (!ctrl.openProjectDraft(id)) return; // preload + (robustly) fit the project
-    view = "editor";
-    if (reduceMotion || !origin) return; // instant switch, no portal
-    const name = recents.find((r) => r.id === id)?.name ?? "";
-    const from: Rect = { x: origin.left, y: origin.top, w: origin.width, h: origin.height };
-    // Measure the editor's canvas region after it mounts (one frame), so the
-    // card grows into exactly where the live circuit will appear.
-    requestAnimationFrame(() => {
-      const r = canvasRegionEl?.getBoundingClientRect();
-      const to: Rect = r && r.width > 0
-        ? { x: r.left, y: r.top, w: r.width, h: r.height }
-        : { x: 200, y: 56, w: window.innerWidth - 420, h: window.innerHeight - 256 }; // chrome-minus fallback
-      portal = { from, to, thumb: thumb ?? null, name };
-      setTimeout(() => { portal = null; }, 660);
-    });
+  /** Hover/focus a card → load + compile that project in the background so the
+   *  click lands on an already-rendering editor. Debounced; skips re-loads. */
+  function onPreload(id: string) {
+    if (preloadedId === id) return;
+    if (preloadTimer) clearTimeout(preloadTimer);
+    preloadTimer = setTimeout(() => {
+      if (preloadedId === id) return;
+      if (ctrl.openProjectDraft(id)) preloadedId = id;
+    }, 90);
   }
 
-  /** Action: the card→editor "portal". The whole clicked card (thumbnail + name)
-   *  starts at its on-screen rect and grows (uniform, undistorted) into the
-   *  editor's canvas rect with a slight push-through overshoot, holding opacity
-   *  until a short late dissolve reveals the already-fit live editor. It's a
-   *  separate fixed element, so it has zero effect on canvas / viewport / layout. */
-  function portalGrow(node: HTMLElement, p: { from: Rect; to: Rect }) {
-    const { from, to } = p;
-    node.style.left = `${from.x}px`; node.style.top = `${from.y}px`;
-    node.style.width = `${from.w}px`; node.style.height = `${from.h}px`;
-    const s = Math.min(to.w / from.w, to.h / from.h); // contain — never distort
-    const dx = (to.x + to.w / 2) - (from.x + from.w / 2);
-    const dy = (to.y + to.h / 2) - (from.y + from.h / 2);
-    const anim = node.animate(
+  function openRecent(id: string, origin?: DOMRect) {
+    if (preloadTimer) { clearTimeout(preloadTimer); preloadTimer = null; }
+    // Reuse the preloaded project if it's this one; otherwise load it now.
+    if (preloadedId !== id) {
+      if (!ctrl.openProjectDraft(id)) return;
+      preloadedId = id;
+    }
+    if (reduceMotion || !origin) { view = "editor"; return; } // instant, no reveal
+    revealRect = { x: origin.left, y: origin.top, w: origin.width, h: origin.height };
+    transitioning = true;
+    view = "editor"; // mount the REAL editor now; it fits itself via the ResizeObserver
+    if (revealTimer) clearTimeout(revealTimer);
+    revealTimer = setTimeout(() => {
+      transitioning = false; revealRect = null;
+      revealAnim?.cancel(); revealAnim = null; // drop the fill-forwards mask → plain editor
+    }, 600);
+  }
+
+  /** Action: clip-path reveal of the live editor — the visible window morphs
+   *  from the clicked card's rect (rounded) to the full viewport (square),
+   *  with a drop-shadow that follows the expanding edge. No scaling of content,
+   *  so the canvas stays pixel-sharp throughout. */
+  function editorReveal(node: HTMLElement, rect: Rect | null) {
+    revealAnim?.cancel();
+    if (!rect) return;
+    const W = window.innerWidth, H = window.innerHeight;
+    const top = Math.max(0, rect.y), left = Math.max(0, rect.x);
+    const right = Math.max(0, W - (rect.x + rect.w)), bottom = Math.max(0, H - (rect.y + rect.h));
+    revealAnim = node.animate(
       [
-        { transform: "translate(0px,0px) scale(1)", opacity: 1, offset: 0 },
-        { transform: `translate(${dx}px,${dy}px) scale(${s})`, opacity: 1, offset: 0.74 },
-        { transform: `translate(${dx}px,${dy}px) scale(${s * 1.04})`, opacity: 0, offset: 1 },
+        { clipPath: `inset(${top}px ${right}px ${bottom}px ${left}px round 14px)`,
+          filter: "drop-shadow(0 18px 50px rgba(0,0,0,0.55))" },
+        { clipPath: "inset(0px 0px 0px 0px round 0px)",
+          filter: "drop-shadow(0 0 0 rgba(0,0,0,0))" },
       ],
-      { duration: 600, easing: "cubic-bezier(.2,.7,.15,1)", fill: "forwards" },
+      { duration: 560, easing: "cubic-bezier(.16,1,.3,1)", fill: "forwards" }, // strong ease-out, no bounce
     );
-    return { destroy() { anim.cancel(); } };
+    return { destroy() { revealAnim?.cancel(); revealAnim = null; } };
   }
 
   function renameProject(id: string, name: string) { renameProjectDraft(id, name); recents = listProjects(); }
@@ -214,11 +228,12 @@
 <svelte:window onkeydown={appKeydown} />
 
 {#if booted}
-{#if view === "home"}
+{#if view === "home" || transitioning}
   <HomeView {recents} onNew={goNew} onOpen={openRecent} onTemplate={openTemplate}
-    onRename={renameProject} onDelete={deleteProject} onOpenSettings={openSettings} />
-{:else}
-<div class="app" style={tokenStyle}>
+    onRename={renameProject} onDelete={deleteProject} onOpenSettings={openSettings} onPreload={onPreload} />
+{/if}
+{#if view === "editor"}
+<div class="app" class:transitioning style={tokenStyle} use:editorReveal={transitioning ? revealRect : null}>
   <header>
     <button class="brand" onclick={goHome} title="Home">
       <BrandMark size={15} interactive />
@@ -303,7 +318,7 @@
     <Palette {ctrl} placePart={ui.placePart} libraryParts={ui.libraryParts} userParts={ui.userParts} />
 
     <main>
-      <div class="canvas-region" bind:this={canvasRegionEl}>
+      <div class="canvas-region">
         <CanvasHost {ctrl} />
         {#if ui.placePart}
           <div class="stamp-banner">Stamping <b>{stampLabel(ui.placePart)}</b> — click to place, Esc to stop</div>
@@ -424,17 +439,6 @@
 {#if shareOpen}
   <div style={tokenStyle}>
     <ShareSheet {ctrl} onClose={() => shareOpen = false} />
-  </div>
-{/if}
-
-{#if portal}
-  <div class="portal" use:portalGrow={portal} style={tokenStyle}>
-    <div class="portal-card">
-      <span class="portal-thumb" class:has={!!portal.thumb}>
-        {#if portal.thumb}<img src={portal.thumb} alt="" />{/if}
-      </span>
-      {#if portal.name}<span class="portal-name">{portal.name}</span>{/if}
-    </div>
   </div>
 {/if}
 
@@ -584,30 +588,12 @@
 
   .splash-wrap { position: fixed; inset: 0; z-index: 200; transition: opacity .4s ease; }
   .splash-wrap.fade { opacity: 0; pointer-events: none; }
-  /* Home → Editor: a safe overlay only. A card-sized thumbnail that lifts and
-     dissolves (portalFade); it's a separate fixed element, so it never affects
-     the canvas size, viewport, or layout. Starts hidden until positioned. */
-  .portal {
-    position: fixed; z-index: 150; opacity: 0;
-    transform-origin: center;
-    will-change: transform, opacity; pointer-events: none;
-  }
-  /* The growing element is a clone of the clicked card — thumbnail + name. */
-  .portal-card {
-    width: 100%; height: 100%; box-sizing: border-box;
-    display: flex; flex-direction: column; gap: 8px; padding: 12px;
-    background: var(--surface2); border: 1px solid var(--hairlineStrong);
-    border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,0.45); overflow: hidden;
-  }
-  .portal-thumb {
-    flex: 1; min-height: 0; border-radius: 8px; overflow: hidden; background: var(--bg);
-    background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
-    background-size: 14px 14px; box-shadow: inset 0 0 0 1px var(--hairline);
-  }
-  .portal-thumb.has { background-image: none; }
-  .portal-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .portal-name {
-    flex: 0 0 auto; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--text1);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* Home → Editor reveal: during the transition the REAL editor is lifted into a
+     full-viewport fixed layer (over Home) and masked by an expanding clip-path
+     (set by the editorReveal action). The canvas is full-size + fitted the whole
+     time, so content stays pixel-sharp — only the visible window grows. */
+  .app.transitioning {
+    position: fixed; inset: 0; z-index: 60;
+    will-change: clip-path, filter;
   }
 </style>

@@ -10,12 +10,14 @@
   let { recents, onNew, onOpen, onTemplate, onRename, onDelete, onOpenSettings, onPreload }: {
     recents: ProjectMeta[];
     onNew: () => void;
-    /** Opens a project; `origin`/`thumb` seed the zoom-portal transition. */
-    onOpen: (id: string, origin: DOMRect, thumb: string | null) => void;
+    /** Opens a project; `origin` (the card rect) seeds the editor-reveal clip. */
+    onOpen: (id: string, origin: DOMRect) => void;
     onTemplate: (id: TemplateId) => void;
     onRename: (id: string, name: string) => void;
     onDelete: (id: string) => void;
     onOpenSettings: (section?: "account") => void;
+    /** Hover/focus a card → preload + compile that project so the open is instant. */
+    onPreload: (id: string) => void;
   } = $props();
 
   const tokenStyle = Object.entries(TOKENS).map(([k, v]) => `--${k}: ${v}`).join(";");
@@ -64,12 +66,11 @@
   }
 
   function open(id: string, e: MouseEvent): void {
-    // The portal expands the WHOLE card (thumbnail + name), so seed it with the
-    // card-body rect for grid cards, or the button itself for Continue cards.
+    // The reveal clip starts at the clicked card's rect — the card-body for grid
+    // cards, or the button itself for Continue cards.
     const cur = e.currentTarget as HTMLElement;
     const surface = cur.closest(".card")?.querySelector(".card-body") ?? cur;
-    const rect = surface.getBoundingClientRect();
-    onOpen(id, rect, thumbFor(recents.find((p) => p.id === id)!));
+    onOpen(id, surface.getBoundingClientRect());
   }
 
   // ---- inline rename + delete-confirm (quiet, card-local) ----
@@ -206,7 +207,9 @@
                   </div>
 
                   {#if renamingId !== p.id && confirmId !== p.id}
-                    <button class="card-open" aria-label="Open {p.name}" onclick={(e) => open(p.id, e)}></button>
+                    <button class="card-open" aria-label="Open {p.name}"
+                      onpointerenter={() => onPreload(p.id)} onfocus={() => onPreload(p.id)}
+                      onclick={(e) => open(p.id, e)}></button>
                   {/if}
 
                   {#if confirmId === p.id}
@@ -256,7 +259,7 @@
         {@const fthumb = thumbFor(feat)}
         <div class="continue">
           <span class="eyebrow">CONTINUE</span>
-          <button class="action resume" onclick={(e) => open(feat.id, e)}>
+          <button class="action resume" onpointerenter={() => onPreload(feat.id)} onfocus={() => onPreload(feat.id)} onclick={(e) => open(feat.id, e)}>
             <span class="thumb resume-thumb" class:has={!!fthumb}>
               {#if fthumb}<img src={fthumb} alt="" draggable="false" />{/if}
             </span>
@@ -265,7 +268,7 @@
           </button>
           {#each resumeList.slice(1) as p (p.id)}
             {@const rthumb = thumbFor(p)}
-            <button class="resume-row" onclick={(e) => open(p.id, e)}>
+            <button class="resume-row" onpointerenter={() => onPreload(p.id)} onfocus={() => onPreload(p.id)} onclick={(e) => open(p.id, e)}>
               <span class="thumb row-thumb" class:has={!!rthumb}>
                 {#if rthumb}<img src={rthumb} alt="" draggable="false" />{/if}
               </span>
