@@ -18,6 +18,7 @@ interface Tracked {
   lastWy: number;
   startTarget: HitResult;
   shift: boolean;
+  alt?: boolean;
   /** "pending" until slop exceeded; then "drag" | "pan". */
   mode: "pending" | "drag" | "pan";
 }
@@ -80,6 +81,7 @@ export class GestureRecognizer {
       lastWx: p.wx, lastWy: p.wy,
       startTarget: null,
       shift: p.shift,
+      alt: p.alt,
       mode: "pending",
     };
 
@@ -184,7 +186,7 @@ export class GestureRecognizer {
       return;
     }
     if (t.mode === "pending") {
-      this.deps.emit({ type: "tap", wx: t.lastWx, wy: t.lastWy, target: t.startTarget, shift: t.shift });
+      this.deps.emit({ type: "tap", wx: t.lastWx, wy: t.lastWy, target: t.startTarget, shift: t.shift, alt: t.alt });
     } else if (t.mode === "drag" && this.dragOwner === p.id) {
       this.dragOwner = null;
       this.deps.emit({ type: "dragEnd", wx: p.wx, wy: p.wy });

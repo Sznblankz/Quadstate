@@ -21,6 +21,8 @@ export interface PointerInput {
   /** 0 = left/primary, 1 = middle, 2 = right. */
   button: number;
   shift: boolean;
+  /** Alt/Option held — used for Alt+tap-a-wire → add to the timing diagram. */
+  alt?: boolean;
 }
 
 export interface WheelInput {
@@ -35,7 +37,7 @@ export interface WheelInput {
  * tool; everything else ignores it.
  */
 export type Intent =
-  | { type: "tap"; wx: number; wy: number; target: HitResult; shift: boolean }
+  | { type: "tap"; wx: number; wy: number; target: HitResult; shift: boolean; alt?: boolean }
   | { type: "dragStart"; wx: number; wy: number; target: HitResult; pressure: number; shift: boolean }
   | { type: "dragMove"; wx: number; wy: number; dwx: number; dwy: number; pressure: number }
   | { type: "dragEnd"; wx: number; wy: number }

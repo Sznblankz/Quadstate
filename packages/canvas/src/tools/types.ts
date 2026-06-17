@@ -36,6 +36,9 @@ export interface ToolContext {
   /** Document structure changed -> recompile + re-elaborate. */
   structureChanged(): void;
   requestRender(): void;
+  /** Add a wire to the timing diagram / Watches (Alt+tap on a wire). Optional —
+   *  hosts that don't wire it up simply don't offer the gesture. */
+  addToScope?(wireId: EntityId): void;
   /** Whether component placement/movement snaps to the grid (Settings). When
    *  false, positions land exactly under the cursor. Defaults to snapping. */
   snap?: boolean;

@@ -62,6 +62,15 @@ export class ModelessTool implements Tool {
       return;
     }
 
+    // Alt+tap a wire adds it to the timing diagram (stable tracked-signal path),
+    // and selects it as feedback. Idempotent if it's already tracked.
+    if (i.alt && i.target?.type === "wire" && ctx.addToScope) {
+      ctx.addToScope(i.target.id);
+      ctx.selection.setTo([i.target.id]);
+      ctx.requestRender();
+      return;
+    }
+
     if (i.target?.type === "port") {
       // A bare tap on a (non-input) port selects its part; wiring is a drag.
       ctx.selection.setTo([i.target.component]);

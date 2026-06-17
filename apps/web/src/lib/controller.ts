@@ -188,6 +188,7 @@ export class AppController {
     poke: (componentId, value) => this.bridge.poke(componentId, value),
     structureChanged: () => this.recompile(),
     requestRender: () => { this.dirtyStatic = true; },
+    addToScope: (id) => this.addTrackedWire(id),
     snap: true,
   };
 
@@ -241,6 +242,7 @@ export class AppController {
         pressure: e.pressure,
         button: phase === "down" ? e.button : 0,
         shift: e.shiftKey,
+        alt: e.altKey,
       };
     };
 
