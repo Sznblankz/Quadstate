@@ -5,6 +5,7 @@
   import { loadProjectDraft, type ProjectMeta } from "./draft.js";
   import { renderThumbnail } from "./thumbnail.js";
   import { TEMPLATES, templateProjectJson, type TemplateId } from "./templates.js";
+  import { reduceMotionActive } from "./settings.svelte.js";
 
   let { recents, onNew, onOpen, onTemplate, onRename, onDelete, onOpenSettings }: {
     recents: ProjectMeta[];
@@ -94,9 +95,65 @@
     e.stopPropagation();
   }
   function autofocus(node: HTMLInputElement) { node.focus(); node.select(); }
+
+  // ---- Cursor glow: a soft neutral light that follows the pointer (ambient,
+  //      behind content) plus a per-surface spotlight on the card/button under
+  //      the cursor. One rAF-throttled, delegated handler; reduced-motion off.
+  let homeEl = $state<HTMLElement>();
+  let glowOn = $state(false);
+  let glowRaf = 0;
+  let gx = 0, gy = 0;
+  let lit: HTMLElement | null = null;
+
+  function glowMove(e: PointerEvent): void {
+    gx = e.clientX; gy = e.clientY;
+    glowOn = true;
+    if (glowRaf) return; // coalesce to one update per frame
+    glowRaf = requestAnimationFrame(() => {
+      glowRaf = 0;
+      if (!homeEl) return;
+      const hr = homeEl.getBoundingClientRect();
+      homeEl.style.setProperty("--glow-x", `${gx - hr.left}px`);
+      homeEl.style.setProperty("--glow-y", `${gy - hr.top}px`);
+      const hit = (document.elementFromPoint(gx, gy) as HTMLElement | null)
+        ?.closest(".card, .action, .resume-row") as HTMLElement | null;
+      if (hit !== lit) {
+        lit?.style.removeProperty("--mx");
+        lit?.style.removeProperty("--my");
+        lit = hit;
+      }
+      if (hit) {
+        const r = hit.getBoundingClientRect();
+        hit.style.setProperty("--mx", `${gx - r.left}px`);
+        hit.style.setProperty("--my", `${gy - r.top}px`);
+      }
+    });
+  }
+
+  $effect(() => {
+    if (reduceMotionActive()) return; // no glow / no listeners under reduced motion
+    const el = homeEl;
+    if (!el) return;
+    const leave = () => {
+      glowOn = false;
+      lit?.style.removeProperty("--mx");
+      lit?.style.removeProperty("--my");
+      lit = null;
+    };
+    const vis = () => { if (document.hidden && glowRaf) { cancelAnimationFrame(glowRaf); glowRaf = 0; } };
+    el.addEventListener("pointermove", glowMove, { passive: true });
+    el.addEventListener("pointerleave", leave);
+    document.addEventListener("visibilitychange", vis);
+    return () => {
+      el.removeEventListener("pointermove", glowMove);
+      el.removeEventListener("pointerleave", leave);
+      document.removeEventListener("visibilitychange", vis);
+      if (glowRaf) { cancelAnimationFrame(glowRaf); glowRaf = 0; }
+    };
+  });
 </script>
 
-<div class="home" style={tokenStyle}>
+<div class="home" class:glow-on={glowOn} bind:this={homeEl} style={tokenStyle}>
   <header>
     <span class="brand">
       <BrandMark size={22} interactive />
@@ -237,12 +294,21 @@
 </div>
 
 <style>
-  .home { height: 100%; background: var(--bg); color: var(--text1); font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden; }
-  header { height: 64px; flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 0 28px; border-bottom: 1px solid var(--hairline); }
+  .home { position: relative; height: 100%; background: var(--bg); color: var(--text1); font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden; }
+  /* Ambient cursor glow — neutral white, behind content (visible in the gutters
+     around the opaque panels). Off until the pointer moves; reduced-motion off. */
+  .home::before {
+    content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    opacity: 0; transition: opacity .25s ease;
+    background: radial-gradient(240px circle at var(--glow-x, 50%) var(--glow-y, 50%), rgba(255,255,255,0.07), transparent 70%);
+  }
+  .home.glow-on::before { opacity: 1; }
+  /* Header above content so the account dropdown still overlays the body. */
+  header { position: relative; z-index: 3; height: 64px; flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 0 28px; border-bottom: 1px solid var(--hairline); }
   .brand { display: flex; align-items: center; gap: 12px; font-weight: 600; font-size: 20px; letter-spacing: -0.01em; }
   .spacer { flex: 1 1 auto; }
 
-  .content { flex: 1; min-height: 0; display: flex; gap: 24px; padding: 24px 28px; }
+  .content { position: relative; z-index: 1; flex: 1; min-height: 0; display: flex; gap: 24px; padding: 24px 28px; }
   .left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
   .actions { width: 300px; flex: 0 0 auto; display: flex; flex-direction: column; gap: 16px; }
 
@@ -290,9 +356,17 @@
      the rename input and quiet hover actions can sit above without nesting
      interactive elements inside a button. */
   .card { position: relative; border-radius: 12px; }
-  .card-body { background: var(--surface2); border: 1px solid var(--hairline); border-radius: 12px; padding: 12px; color: var(--text1); display: flex; flex-direction: column; gap: 8px; transition: background .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
+  .card-body { position: relative; overflow: hidden; background: var(--surface2); border: 1px solid var(--hairline); border-radius: 12px; padding: 12px; color: var(--text1); display: flex; flex-direction: column; gap: 8px; transition: background .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
   .card-open { position: absolute; inset: 0; z-index: 2; background: none; border: none; border-radius: 12px; cursor: pointer; padding: 0; }
   .card:hover .card-body { background: var(--surface3); border-color: var(--hairlineStrong); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+  /* Cursor spotlight — a soft neutral highlight on the surface under the pointer
+     (--mx/--my set by the delegated glow handler; cards inherit them from .card). */
+  .card-body::after, .action::after, .resume-row::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    opacity: 0; transition: opacity .2s ease;
+    background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,0.08), transparent 65%);
+  }
+  .card:hover .card-body::after, .action:hover::after, .resume-row:hover::after { opacity: 1; }
   .card-thumb { height: 92px; border-radius: 8px; overflow: hidden; background: var(--bg); background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 14px 14px; box-shadow: inset 0 0 0 1px var(--hairline); }
   .thumb.has { background-image: none; }
   .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -324,7 +398,7 @@
   .fade { position: absolute; left: 1px; right: 1px; bottom: 1px; height: 56px; border-radius: 0 0 16px 16px; pointer-events: none; background: linear-gradient(to bottom, rgba(19,22,28,0), var(--surface1)); }
 
   /* Right-side large action cards. */
-  .action { text-align: left; border-radius: 16px; padding: 20px; cursor: pointer; font: inherit; color: var(--text1); border: 1px solid var(--hairline); background: var(--surface1); display: flex; flex-direction: column; gap: 6px; transition: background .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
+  .action { position: relative; overflow: hidden; text-align: left; border-radius: 16px; padding: 20px; cursor: pointer; font: inherit; color: var(--text1); border: 1px solid var(--hairline); background: var(--surface1); display: flex; flex-direction: column; gap: 6px; transition: background .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
   .action-title { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .action-sub { font-size: 13px; color: var(--text2); }
   .action.new { background: var(--accent); border-color: var(--accent); color: #fff; min-height: 150px; justify-content: center; }
@@ -339,7 +413,7 @@
   .action.resume:hover { background: var(--surface2); border-color: var(--hairlineStrong); transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
   .resume-thumb { flex: 1; min-height: 70px; margin: 8px 0; border-radius: 10px; overflow: hidden; background: var(--bg); background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 16px 16px; box-shadow: inset 0 0 0 1px var(--hairline); }
 
-  .resume-row { flex: 0 0 auto; display: flex; align-items: center; gap: 11px; text-align: left; background: var(--surface1); border: 1px solid var(--hairline); border-radius: 12px; padding: 9px; cursor: pointer; font: inherit; color: var(--text1); transition: background .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
+  .resume-row { position: relative; overflow: hidden; flex: 0 0 auto; display: flex; align-items: center; gap: 11px; text-align: left; background: var(--surface1); border: 1px solid var(--hairline); border-radius: 12px; padding: 9px; cursor: pointer; font: inherit; color: var(--text1); transition: background .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
   .resume-row:hover { background: var(--surface2); border-color: var(--hairlineStrong); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,0.32); }
   .resume-row:active { transform: translateY(0); }
   .row-thumb { flex: 0 0 auto; width: 64px; height: 44px; border-radius: 8px; overflow: hidden; background: var(--bg); background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 12px 12px; box-shadow: inset 0 0 0 1px var(--hairline); }
@@ -351,5 +425,10 @@
     .content, .actions { animation: none; }
     .tpl, .card-body, .action, .card-actions, .resume-row { transition: none; }
     .tpl:hover, .card:hover .card-body, .action:hover, .resume-row:hover { transform: none; }
+    .home::before, .card-body::after, .action::after, .resume-row::after { display: none; }
   }
+  :global([data-reduced-motion="1"]) .home::before,
+  :global([data-reduced-motion="1"]) .card-body::after,
+  :global([data-reduced-motion="1"]) .action::after,
+  :global([data-reduced-motion="1"]) .resume-row::after { display: none; }
 </style>
