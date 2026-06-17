@@ -12,8 +12,7 @@
   import HelpOverlay from "./lib/HelpOverlay.svelte";
   import ShareSheet from "./lib/ShareSheet.svelte";
   import { AppController, type UiState } from "./lib/controller.js";
-  import { listProjects, deleteProjectDraft, renameProjectDraft, loadProjectDraft, type ProjectMeta } from "./lib/draft.js";
-  import { renderCircuitPng } from "./lib/thumbnail.js";
+  import { listProjects, deleteProjectDraft, renameProjectDraft, type ProjectMeta } from "./lib/draft.js";
   import { type TemplateId } from "./lib/templates.js";
   import { settings, applyReducedMotion, reduceMotionActive } from "./lib/settings.svelte.js";
 
@@ -71,57 +70,37 @@
 
   // --- Home → Editor "portal": mount the editor normally (the controller fits
   //     the circuit to the canvas robustly, once the canvas has real dimensions).
-  //     The transition is a SAFE overlay only — a fixed image that grows from the
-  //     clicked card into the editor's canvas area and dissolves into the live,
-  //     already-fit editor. It never touches the canvas, viewport, or layout, so
-  //     it can't break editor positioning.
+  //     The transition is a SAFE overlay only — a clone of the clicked CARD (its
+  //     thumbnail + name) that grows from the card into the editor's canvas area
+  //     and dissolves into the live, already-fit editor. It never touches the
+  //     canvas, viewport, or layout, so it can't break editor positioning.
   type Rect = { x: number; y: number; w: number; h: number };
-  let portal = $state<{ from: Rect; to: Rect; img: string | null } | null>(null);
+  let portal = $state<{ from: Rect; to: Rect; thumb: string | null; name: string } | null>(null);
   let canvasRegionEl = $state<HTMLElement>();
-
-  // Crisp, fit-to-content portal images, preloaded on card hover and keyed by
-  // id:savedAt (mirrors HomeView's thumb cache) so the click is instant.
-  const portalImgCache = new Map<string, string | null>();
-  const portalKey = (id: string) => `${id}:${recents.find((r) => r.id === id)?.savedAt ?? 0}`;
-  function renderPortalImg(id: string): string | null {
-    const key = portalKey(id);
-    const hit = portalImgCache.get(key);
-    if (hit !== undefined) return hit;
-    const d = loadProjectDraft(id);
-    const img = d ? renderCircuitPng(d.json, { target: 1600, pad: 48, dpr: 2 }) : null;
-    portalImgCache.set(key, img);
-    return img;
-  }
-  function onPreload(id: string) {
-    if (portalImgCache.has(portalKey(id))) return;
-    const run = () => renderPortalImg(id);
-    const ric = (window as Window & { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback;
-    if (ric) ric(run); else setTimeout(run, 0);
-  }
 
   function openRecent(id: string, origin?: DOMRect, thumb?: string | null) {
     if (!ctrl.openProjectDraft(id)) return; // preload + (robustly) fit the project
     view = "editor";
     if (reduceMotion || !origin) return; // instant switch, no portal
-    const img = renderPortalImg(id) ?? thumb ?? null;
+    const name = recents.find((r) => r.id === id)?.name ?? "";
     const from: Rect = { x: origin.left, y: origin.top, w: origin.width, h: origin.height };
     // Measure the editor's canvas region after it mounts (one frame), so the
-    // image grows into exactly where the live circuit will appear.
+    // card grows into exactly where the live circuit will appear.
     requestAnimationFrame(() => {
       const r = canvasRegionEl?.getBoundingClientRect();
       const to: Rect = r && r.width > 0
         ? { x: r.left, y: r.top, w: r.width, h: r.height }
         : { x: 200, y: 56, w: window.innerWidth - 420, h: window.innerHeight - 256 }; // chrome-minus fallback
-      portal = { from, to, img };
-      setTimeout(() => { portal = null; }, 640);
+      portal = { from, to, thumb: thumb ?? null, name };
+      setTimeout(() => { portal = null; }, 660);
     });
   }
 
-  /** Action: the card→editor "portal". A fixed image starts on the clicked card
-   *  and grows (uniform, undistorted) into the editor's canvas rect, holding
-   *  opacity until a short late dissolve reveals the already-fit live editor.
-   *  It's a separate fixed element, so it has zero effect on canvas / viewport /
-   *  layout. */
+  /** Action: the card→editor "portal". The whole clicked card (thumbnail + name)
+   *  starts at its on-screen rect and grows (uniform, undistorted) into the
+   *  editor's canvas rect with a slight push-through overshoot, holding opacity
+   *  until a short late dissolve reveals the already-fit live editor. It's a
+   *  separate fixed element, so it has zero effect on canvas / viewport / layout. */
   function portalGrow(node: HTMLElement, p: { from: Rect; to: Rect }) {
     const { from, to } = p;
     node.style.left = `${from.x}px`; node.style.top = `${from.y}px`;
@@ -132,10 +111,10 @@
     const anim = node.animate(
       [
         { transform: "translate(0px,0px) scale(1)", opacity: 1, offset: 0 },
-        { transform: `translate(${dx}px,${dy}px) scale(${s})`, opacity: 1, offset: 0.72 },
-        { transform: `translate(${dx}px,${dy}px) scale(${s})`, opacity: 0, offset: 1 },
+        { transform: `translate(${dx}px,${dy}px) scale(${s})`, opacity: 1, offset: 0.74 },
+        { transform: `translate(${dx}px,${dy}px) scale(${s * 1.04})`, opacity: 0, offset: 1 },
       ],
-      { duration: 560, easing: "cubic-bezier(.22,.9,.18,1)", fill: "forwards" },
+      { duration: 600, easing: "cubic-bezier(.2,.7,.15,1)", fill: "forwards" },
     );
     return { destroy() { anim.cancel(); } };
   }
@@ -237,12 +216,12 @@
 {#if booted}
 {#if view === "home"}
   <HomeView {recents} onNew={goNew} onOpen={openRecent} onTemplate={openTemplate}
-    onRename={renameProject} onDelete={deleteProject} onOpenSettings={openSettings} onPreload={onPreload} />
+    onRename={renameProject} onDelete={deleteProject} onOpenSettings={openSettings} />
 {:else}
 <div class="app" style={tokenStyle}>
   <header>
     <button class="brand" onclick={goHome} title="Home">
-      <BrandMark size={15} />
+      <BrandMark size={15} interactive />
       QuadState
     </button>
 
@@ -291,12 +270,24 @@
         title="Create a chip from the selected parts (Ctrl+G)">Create Chip</button>
     </div>
     <div class="seg">
-      <button disabled={ui.editing != null} onclick={() => ctrl.saveProject()}>Save</button>
-      <button disabled={ui.editing != null} onclick={() => ctrl.openProject()}>Open</button>
-      <button disabled={ui.editing != null} onclick={() => ctrl.importChip()}
-        title="Import a shared chip bundle into the palette">Import</button>
-      <button class="share" disabled={ui.editing != null} onclick={() => shareOpen = true}
-        title="Share / export this circuit">Share</button>
+      <button class="iconbtn" disabled={ui.editing != null} onclick={() => ctrl.saveProject()}>
+        <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h10l4 4v12H5z"/><path d="M8 4v5h6V4"/><path d="M8 13h8v6H8z"/></svg>
+        Save
+      </button>
+      <button class="iconbtn" disabled={ui.editing != null} onclick={() => ctrl.openProject()}>
+        <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/></svg>
+        Open
+      </button>
+      <button class="iconbtn" disabled={ui.editing != null} onclick={() => ctrl.importChip()}
+        title="Import a shared chip bundle into the palette">
+        <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        Import
+      </button>
+      <button class="iconbtn share" disabled={ui.editing != null} onclick={() => shareOpen = true}
+        title="Share / export this circuit">
+        <svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="12" r="2.4"/><circle cx="17" cy="6" r="2.4"/><circle cx="17" cy="18" r="2.4"/><path d="M8.1 10.9l6.8-3.8"/><path d="M8.1 13.1l6.8 3.8"/></svg>
+        Share
+      </button>
     </div>
 
     <div class="seg">
@@ -438,7 +429,12 @@
 
 {#if portal}
   <div class="portal" use:portalGrow={portal} style={tokenStyle}>
-    {#if portal.img}<img src={portal.img} alt="" />{/if}
+    <div class="portal-card">
+      <span class="portal-thumb" class:has={!!portal.thumb}>
+        {#if portal.thumb}<img src={portal.thumb} alt="" />{/if}
+      </span>
+      {#if portal.name}<span class="portal-name">{portal.name}</span>{/if}
+    </div>
   </div>
 {/if}
 
@@ -477,6 +473,9 @@
   .transport button.run { color: var(--text1); border-color: var(--hairlineStrong); }
   button.chip:not(:disabled) { color: var(--text1); }
   button.share:not(:disabled) { color: var(--text1); }
+  .iconbtn { display: inline-flex; align-items: center; gap: 6px; }
+  .btn-ico { width: 14px; height: 14px; flex: 0 0 auto; }
+  button:disabled .btn-ico { opacity: 0.6; }
 
   .speed { display: flex; align-items: center; gap: 7px; color: var(--text3); font-size: 12px; font-family: ui-monospace, monospace; }
   .speed input { width: 96px; }
@@ -591,9 +590,24 @@
   .portal {
     position: fixed; z-index: 150; opacity: 0;
     transform-origin: center;
-    background: var(--bg); overflow: hidden; border-radius: 12px;
-    box-shadow: 0 18px 50px rgba(0,0,0,0.45);
     will-change: transform, opacity; pointer-events: none;
   }
-  .portal img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  /* The growing element is a clone of the clicked card — thumbnail + name. */
+  .portal-card {
+    width: 100%; height: 100%; box-sizing: border-box;
+    display: flex; flex-direction: column; gap: 8px; padding: 12px;
+    background: var(--surface2); border: 1px solid var(--hairlineStrong);
+    border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,0.45); overflow: hidden;
+  }
+  .portal-thumb {
+    flex: 1; min-height: 0; border-radius: 8px; overflow: hidden; background: var(--bg);
+    background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+    background-size: 14px 14px; box-shadow: inset 0 0 0 1px var(--hairline);
+  }
+  .portal-thumb.has { background-image: none; }
+  .portal-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .portal-name {
+    flex: 0 0 auto; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--text1);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
 </style>

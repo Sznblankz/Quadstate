@@ -16,8 +16,6 @@
     onRename: (id: string, name: string) => void;
     onDelete: (id: string) => void;
     onOpenSettings: (section?: "account") => void;
-    /** Hover hint: warm the crisp portal image for this project so the open is instant. */
-    onPreload: (id: string) => void;
   } = $props();
 
   const tokenStyle = Object.entries(TOKENS).map(([k, v]) => `--${k}: ${v}`).join(";");
@@ -66,14 +64,11 @@
   }
 
   function open(id: string, e: MouseEvent): void {
-    // Prefer the button's own .thumb (Continue cards), else the parent card's
-    // .thumb (My Projects), else the button itself — so any opener seeds a
-    // sensible portal origin rect.
+    // The portal expands the WHOLE card (thumbnail + name), so seed it with the
+    // card-body rect for grid cards, or the button itself for Continue cards.
     const cur = e.currentTarget as HTMLElement;
-    const thumbEl = cur.querySelector(".thumb")
-      ?? cur.closest(".card")?.querySelector(".thumb")
-      ?? cur;
-    const rect = thumbEl.getBoundingClientRect();
+    const surface = cur.closest(".card")?.querySelector(".card-body") ?? cur;
+    const rect = surface.getBoundingClientRect();
     onOpen(id, rect, thumbFor(recents.find((p) => p.id === id)!));
   }
 
@@ -98,32 +93,28 @@
   }
   function autofocus(node: HTMLInputElement) { node.focus(); node.select(); }
 
-  // ---- Cursor glow: a soft neutral light that follows the pointer (ambient,
-  //      behind content) plus a per-surface spotlight on the card/button under
-  //      the cursor. One rAF-throttled, delegated handler; reduced-motion off.
+  // ---- Cursor glow: a subtle neutral spotlight on the ACTION BUTTON under the
+  //      pointer (New Circuit / Continue) — not the project thumbnails. One
+  //      rAF-throttled, delegated handler; off under reduced motion.
   let homeEl = $state<HTMLElement>();
-  let glowOn = $state(false);
   let glowRaf = 0;
   let gx = 0, gy = 0;
   let lit: HTMLElement | null = null;
 
+  function clearLit(): void {
+    lit?.style.removeProperty("--mx");
+    lit?.style.removeProperty("--my");
+    lit = null;
+  }
+
   function glowMove(e: PointerEvent): void {
     gx = e.clientX; gy = e.clientY;
-    glowOn = true;
     if (glowRaf) return; // coalesce to one update per frame
     glowRaf = requestAnimationFrame(() => {
       glowRaf = 0;
-      if (!homeEl) return;
-      const hr = homeEl.getBoundingClientRect();
-      homeEl.style.setProperty("--glow-x", `${gx - hr.left}px`);
-      homeEl.style.setProperty("--glow-y", `${gy - hr.top}px`);
       const hit = (document.elementFromPoint(gx, gy) as HTMLElement | null)
-        ?.closest(".card, .action, .resume-row") as HTMLElement | null;
-      if (hit !== lit) {
-        lit?.style.removeProperty("--mx");
-        lit?.style.removeProperty("--my");
-        lit = hit;
-      }
+        ?.closest(".action, .resume-row") as HTMLElement | null;
+      if (hit !== lit) { clearLit(); lit = hit; }
       if (hit) {
         const r = hit.getBoundingClientRect();
         hit.style.setProperty("--mx", `${gx - r.left}px`);
@@ -136,26 +127,21 @@
     if (reduceMotionActive()) return; // no glow / no listeners under reduced motion
     const el = homeEl;
     if (!el) return;
-    const leave = () => {
-      glowOn = false;
-      lit?.style.removeProperty("--mx");
-      lit?.style.removeProperty("--my");
-      lit = null;
-    };
     const vis = () => { if (document.hidden && glowRaf) { cancelAnimationFrame(glowRaf); glowRaf = 0; } };
     el.addEventListener("pointermove", glowMove, { passive: true });
-    el.addEventListener("pointerleave", leave);
+    el.addEventListener("pointerleave", clearLit);
     document.addEventListener("visibilitychange", vis);
     return () => {
       el.removeEventListener("pointermove", glowMove);
-      el.removeEventListener("pointerleave", leave);
+      el.removeEventListener("pointerleave", clearLit);
       document.removeEventListener("visibilitychange", vis);
       if (glowRaf) { cancelAnimationFrame(glowRaf); glowRaf = 0; }
+      clearLit();
     };
   });
 </script>
 
-<div class="home" class:glow-on={glowOn} bind:this={homeEl} style={tokenStyle}>
+<div class="home" bind:this={homeEl} style={tokenStyle}>
   <header>
     <span class="brand">
       <BrandMark size={22} interactive />
@@ -220,7 +206,7 @@
                   </div>
 
                   {#if renamingId !== p.id && confirmId !== p.id}
-                    <button class="card-open" aria-label="Open {p.name}" onpointerenter={() => onPreload(p.id)} onclick={(e) => open(p.id, e)}></button>
+                    <button class="card-open" aria-label="Open {p.name}" onclick={(e) => open(p.id, e)}></button>
                   {/if}
 
                   {#if confirmId === p.id}
@@ -270,7 +256,7 @@
         {@const fthumb = thumbFor(feat)}
         <div class="continue">
           <span class="eyebrow">CONTINUE</span>
-          <button class="action resume" onpointerenter={() => onPreload(feat.id)} onclick={(e) => open(feat.id, e)}>
+          <button class="action resume" onclick={(e) => open(feat.id, e)}>
             <span class="thumb resume-thumb" class:has={!!fthumb}>
               {#if fthumb}<img src={fthumb} alt="" draggable="false" />{/if}
             </span>
@@ -279,7 +265,7 @@
           </button>
           {#each resumeList.slice(1) as p (p.id)}
             {@const rthumb = thumbFor(p)}
-            <button class="resume-row" onpointerenter={() => onPreload(p.id)} onclick={(e) => open(p.id, e)}>
+            <button class="resume-row" onclick={(e) => open(p.id, e)}>
               <span class="thumb row-thumb" class:has={!!rthumb}>
                 {#if rthumb}<img src={rthumb} alt="" draggable="false" />{/if}
               </span>
@@ -296,21 +282,12 @@
 </div>
 
 <style>
-  .home { position: relative; height: 100%; background: var(--bg); color: var(--text1); font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden; }
-  /* Ambient cursor glow — neutral white, behind content (visible in the gutters
-     around the opaque panels). Off until the pointer moves; reduced-motion off. */
-  .home::before {
-    content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
-    opacity: 0; transition: opacity .25s ease;
-    background: radial-gradient(240px circle at var(--glow-x, 50%) var(--glow-y, 50%), rgba(255,255,255,0.07), transparent 70%);
-  }
-  .home.glow-on::before { opacity: 1; }
-  /* Header above content so the account dropdown still overlays the body. */
-  header { position: relative; z-index: 3; height: 64px; flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 0 28px; border-bottom: 1px solid var(--hairline); }
+  .home { height: 100%; background: var(--bg); color: var(--text1); font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden; }
+  header { height: 64px; flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 0 28px; border-bottom: 1px solid var(--hairline); }
   .brand { display: flex; align-items: center; gap: 12px; font-weight: 600; font-size: 20px; letter-spacing: -0.01em; }
   .spacer { flex: 1 1 auto; }
 
-  .content { position: relative; z-index: 1; flex: 1; min-height: 0; display: flex; gap: 24px; padding: 24px 28px; }
+  .content { flex: 1; min-height: 0; display: flex; gap: 24px; padding: 24px 28px; }
   .left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
   .actions { width: 300px; flex: 0 0 auto; display: flex; flex-direction: column; gap: 16px; }
 
@@ -358,17 +335,18 @@
      the rename input and quiet hover actions can sit above without nesting
      interactive elements inside a button. */
   .card { position: relative; border-radius: 12px; }
-  .card-body { position: relative; overflow: hidden; background: var(--surface2); border: 1px solid var(--hairline); border-radius: 12px; padding: 12px; color: var(--text1); display: flex; flex-direction: column; gap: 8px; transition: background .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
+  .card-body { background: var(--surface2); border: 1px solid var(--hairline); border-radius: 12px; padding: 12px; color: var(--text1); display: flex; flex-direction: column; gap: 8px; transition: background .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
   .card-open { position: absolute; inset: 0; z-index: 2; background: none; border: none; border-radius: 12px; cursor: pointer; padding: 0; }
   .card:hover .card-body { background: var(--surface3); border-color: var(--hairlineStrong); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
-  /* Cursor spotlight — a soft neutral highlight on the surface under the pointer
-     (--mx/--my set by the delegated glow handler; cards inherit them from .card). */
-  .card-body::after, .action::after, .resume-row::after {
+  /* Cursor spotlight — a subtle neutral highlight on the ACTION BUTTON under the
+     pointer (New Circuit / Continue), never on the project thumbnails.
+     --mx/--my set by the delegated glow handler. */
+  .action::after, .resume-row::after {
     content: ""; position: absolute; inset: 0; pointer-events: none;
     opacity: 0; transition: opacity .2s ease;
-    background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,0.08), transparent 65%);
+    background: radial-gradient(180px circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,0.05), transparent 60%);
   }
-  .card:hover .card-body::after, .action:hover::after, .resume-row:hover::after { opacity: 1; }
+  .action:hover::after, .resume-row:hover::after { opacity: 1; }
   .card-thumb { height: 92px; border-radius: 8px; overflow: hidden; background: var(--bg); background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 14px 14px; box-shadow: inset 0 0 0 1px var(--hairline); }
   .thumb.has { background-image: none; }
   .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -427,10 +405,8 @@
     .content, .actions { animation: none; }
     .tpl, .card-body, .action, .card-actions, .resume-row { transition: none; }
     .tpl:hover, .card:hover .card-body, .action:hover, .resume-row:hover { transform: none; }
-    .home::before, .card-body::after, .action::after, .resume-row::after { display: none; }
+    .action::after, .resume-row::after { display: none; }
   }
-  :global([data-reduced-motion="1"]) .home::before,
-  :global([data-reduced-motion="1"]) .card-body::after,
   :global([data-reduced-motion="1"]) .action::after,
   :global([data-reduced-motion="1"]) .resume-row::after { display: none; }
 </style>
