@@ -1,9 +1,11 @@
 <script lang="ts">
   import { account, signIn, signOut, initials, ACCOUNT_IS_MOCK } from "./account.svelte.js";
 
-  let { onOpenSettings }: {
+  let { onOpenSettings, size = 34 }: {
     /** Open the Settings overlay, optionally at a given section. */
     onOpenSettings: (section?: "account") => void;
+    /** Trigger-avatar diameter in px (opt-in; the in-menu avatar stays 34). */
+    size?: number;
   } = $props();
 
   let open = $state(false);
@@ -42,6 +44,7 @@
   <button
     class="avatar"
     class:signed={account.status === "signedIn"}
+    style="--avatar:{size}px"
     aria-haspopup="menu"
     aria-expanded={open}
     title={account.status === "signedIn" ? (account.name || account.email) : "Account"}
@@ -122,7 +125,7 @@
   .account { position: relative; display: flex; }
 
   .avatar {
-    width: 34px; height: 34px; border-radius: 50%;
+    width: var(--avatar, 34px); height: var(--avatar, 34px); border-radius: 50%;
     display: grid; place-items: center; padding: 0;
     background: var(--surface2); color: var(--text2);
     border: 1px solid var(--hairline); cursor: pointer;
@@ -131,9 +134,9 @@
   .avatar:hover { background: var(--surface3); color: var(--text1); border-color: var(--hairlineStrong); }
   .avatar:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accentQuiet); }
   .account.open .avatar { border-color: var(--hairlineStrong); color: var(--text1); }
-  .avatar svg { width: 19px; height: 19px; }
+  .avatar svg { width: calc(var(--avatar, 34px) * 0.56); height: calc(var(--avatar, 34px) * 0.56); }
   .avatar.signed { color: var(--text1); }
-  .initials { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; font-family: ui-monospace, monospace; }
+  .initials { font-size: calc(var(--avatar, 34px) * 0.35); font-weight: 600; letter-spacing: 0.02em; font-family: ui-monospace, monospace; }
 
   .scrim { position: fixed; inset: 0; z-index: 40; background: none; border: none; cursor: default; }
 

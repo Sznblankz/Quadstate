@@ -92,11 +92,11 @@
 <div class="home" style={tokenStyle}>
   <header>
     <span class="brand">
-      <BrandMark size={15} />
+      <BrandMark size={22} interactive />
       QuadState
     </span>
     <span class="spacer"></span>
-    <AccountMenu onOpenSettings={onOpenSettings} />
+    <AccountMenu onOpenSettings={onOpenSettings} size={40} />
   </header>
 
   <div class="content">
@@ -216,8 +216,8 @@
 
 <style>
   .home { height: 100%; background: var(--bg); color: var(--text1); font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden; }
-  header { height: 56px; flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 0 28px; border-bottom: 1px solid var(--hairline); }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; }
+  header { height: 64px; flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 0 28px; border-bottom: 1px solid var(--hairline); }
+  .brand { display: flex; align-items: center; gap: 12px; font-weight: 600; font-size: 20px; letter-spacing: -0.01em; }
   .spacer { flex: 1 1 auto; }
 
   .content { flex: 1; min-height: 0; display: flex; gap: 24px; padding: 24px 28px; }
