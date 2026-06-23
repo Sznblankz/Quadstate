@@ -6,7 +6,7 @@ import { ICONIC_GATES, componentGeom, isIo, layoutInterface, wireJunctions, wire
 import type { SpatialGrid } from "../grid.js";
 import type { Viewport } from "../transform.js";
 import type { OverlayState } from "../tools/types.js";
-import { TOKENS } from "../tokens.js";
+import { THEMES, type ThemeName, type Tokens } from "../tokens.js";
 
 /**
  * Layered Canvas2D renderer (plan: 4 stacked canvases redrawn
@@ -38,26 +38,37 @@ export interface RenderState {
   showGrid?: boolean;
 }
 
-// Re-skinned to the approved QuadState tokens (VISUAL_SYSTEM_SUMMARY §1).
-// COLORS is a thin alias over TOKENS so existing call sites stay unchanged.
-const COLORS = {
-  background: TOKENS.bg,
-  gridDot: TOKENS.gridDot,
-  body: TOKENS.partFill,
-  bodyEdge: TOKENS.partEdge,
-  partStroke: TOKENS.partStroke,
-  label: TOKENS.label,
-  port: TOKENS.pin,
-  wire: TOKENS.wireNeutral,
-  selection: TOKENS.accent,
-  marqueeFill: TOKENS.accentQuiet,
-  signal: {
-    [LO]: TOKENS.sig0,
-    [HI]: TOKENS.sig1,
-    [X]: TOKENS.sigX,
-    [Z]: TOKENS.sigZ,
-  } as Record<number, string>,
-};
+// COLORS is a thin alias over the ACTIVE palette so call sites stay unchanged.
+// It's a `let` rebuilt by setActiveTheme(); the render fns read COLORS.* at call
+// time, so a theme swap is visible on the next frame with no call-site edits.
+function buildColors(t: Tokens) {
+  return {
+    background: t.bg,
+    gridDot: t.gridDot,
+    body: t.partFill,
+    bodyEdge: t.partEdge,
+    partStroke: t.partStroke,
+    label: t.label,
+    port: t.pin,
+    wire: t.wireNeutral,
+    selection: t.accent,
+    marqueeFill: t.accentQuiet,
+    signal: {
+      [LO]: t.sig0,
+      [HI]: t.sig1,
+      [X]: t.sigX,
+      [Z]: t.sigZ,
+    } as Record<number, string>,
+  };
+}
+
+let COLORS = buildColors(THEMES.light);
+
+/** Swap the renderer's active palette. The app marks the canvas dirty so the
+ *  permanent rAF loop repaints with the new colors next frame. */
+export function setActiveTheme(name: ThemeName): void {
+  COLORS = buildColors(THEMES[name]);
+}
 
 export function signalColor(v: number): string {
   return COLORS.signal[v] ?? COLORS.signal[Z];
@@ -301,7 +312,7 @@ export function renderSignals(ctx: CanvasRenderingContext2D, s: RenderState): vo
   applyView(ctx, s);
 
   // Approved 4-state signal language (VISUAL_SYSTEM_SUMMARY §2):
-  //   1 = green solid + halo · 0 = blue flat · X = red dash-dot · Z = gray dash.
+  //   1 = green solid + halo · 0 = blue flat · X = amber dash-dot · Z = gray dash.
   // Pattern + glow carry state (never colour alone); thickness stays 1-bit
   // base here — the bus-width channel is reserved but unused in P0.
   const ids = visibleIds(s);
@@ -415,7 +426,7 @@ export function renderInk(ctx: CanvasRenderingContext2D, s: RenderState): void {
 function drawStroke(ctx: CanvasRenderingContext2D, stroke: InkStroke, selected: boolean): void {
   const pts = stroke.points;
   if (pts.length < 2) return;
-  ctx.strokeStyle = selected ? "#4f9cf9" : stroke.color;
+  ctx.strokeStyle = selected ? COLORS.selection : stroke.color;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   for (let i = 1; i < pts.length; i++) {

@@ -183,7 +183,7 @@
     position: absolute; top: calc(100% + 8px); right: 0; z-index: 41;
     width: 256px; padding: 8px;
     background: var(--surface1); border: 1px solid var(--hairlineStrong);
-    border-radius: 12px; box-shadow: 0 18px 48px rgba(0,0,0,0.5);
+    border-radius: 12px; box-shadow: 0 18px 48px var(--shadow);
     animation: drop .14s ease both;
   }
   @keyframes drop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }

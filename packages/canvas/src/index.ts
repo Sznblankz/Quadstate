@@ -1,6 +1,6 @@
 export { Viewport } from "./transform.js";
 export { SpatialGrid } from "./grid.js";
-export { TOKENS, type Tokens } from "./tokens.js";
+export { TOKENS, THEMES, type Tokens, type ThemeName } from "./tokens.js";
 export { MIXED, aggregateBus, busHex, busBin } from "./bus.js";
 export {
   SNAP, componentBounds, componentGeom, hitTest, isIo, layoutInterface,
@@ -18,5 +18,5 @@ export { InkTool } from "./tools/ink.js";
 export { PlaceTool } from "./tools/place.js";
 export {
   CanvasStack, renderInk, renderOverlay, renderSchematic, renderSignals,
-  signalColor, type RenderState,
+  setActiveTheme, signalColor, type RenderState,
 } from "./render/renderer.js";

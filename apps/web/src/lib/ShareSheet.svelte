@@ -159,14 +159,14 @@
 <style>
   .scrim {
     position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
-    background: rgba(7, 9, 12, 0.6); backdrop-filter: blur(3px); padding: 24px;
+    background: var(--scrim); backdrop-filter: blur(3px); padding: 24px;
     animation: fade .12s ease both;
   }
   @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
   .panel {
     width: min(560px, 100%); max-height: 86vh; overflow-y: auto;
     background: var(--surface1); border: 1px solid var(--hairline);
-    border-radius: 14px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+    border-radius: 14px; box-shadow: 0 24px 60px var(--shadow);
     color: var(--text1); padding: 18px 20px 20px;
   }
   header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }

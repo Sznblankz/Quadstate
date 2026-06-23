@@ -6,7 +6,7 @@
     <title>QuadState</title>
     <style>
       html, body, #app { margin: 0; height: 100%; overflow: hidden; }
-      body { background: #0b0f14; color: #c7d2de; font: 13px system-ui, sans-serif; }
+      body { background: #FFFFFF; color: #1C2128; font: 13px system-ui, sans-serif; }
       /* Settings → Reduce motion: neutralise animations/transitions app-wide.
          The OS prefers-reduced-motion is handled by per-component @media rules;
          this honours the in-app toggle (set on <html> by settings.svelte.ts). */
@@ -21,6 +21,20 @@
     </style>
   </head>
   <body>
+    <script>
+      // Apply the saved theme before the app mounts so a dark-theme user never
+      // flashes the white default (and vice-versa). Mirrors settings.svelte.ts.
+      (function () {
+        var t = "light";
+        try {
+          var raw = localStorage.getItem("quadstate:settings:v1");
+          if (raw) { var s = JSON.parse(raw); if (s && (s.theme === "light" || s.theme === "dark")) t = s.theme; }
+        } catch (e) { /* ignore */ }
+        document.documentElement.dataset.theme = t;
+        document.body.style.background = t === "dark" ? "#0B0D11" : "#FFFFFF";
+        document.body.style.color = t === "dark" ? "#E8EBF1" : "#1C2128";
+      })();
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

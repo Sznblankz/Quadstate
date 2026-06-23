@@ -104,10 +104,12 @@
         {#if active === "appearance"}
           <h3>Appearance & Accessibility</h3>
           <div class="row">
-            {@render row("Theme", "QuadState is dark-only for now. Light mode may come later.")}
+            {@render row("Theme", "Light or dark appearance. Light is the default.")}
             <div class="seg" aria-label="Theme">
-              <button class="seg-btn sel" aria-pressed="true">Dark</button>
-              <button class="seg-btn" disabled title="Coming later">Light</button>
+              <button class="seg-btn" class:sel={settings.theme === "light"} aria-pressed={settings.theme === "light"}
+                onclick={() => setSetting("theme", "light")}>Light</button>
+              <button class="seg-btn" class:sel={settings.theme === "dark"} aria-pressed={settings.theme === "dark"}
+                onclick={() => setSetting("theme", "dark")}>Dark</button>
             </div>
           </div>
           <div class="row">
@@ -232,13 +234,13 @@
 
 <style>
   .overlay { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 24px; }
-  .backdrop { position: absolute; inset: 0; background: rgba(5,6,9,0.62); backdrop-filter: blur(2px); border: none; cursor: default; }
+  .backdrop { position: absolute; inset: 0; background: var(--scrim); backdrop-filter: blur(2px); border: none; cursor: default; }
 
   .modal {
     position: relative; width: min(760px, 100%); height: min(560px, 92vh);
     display: flex; flex-direction: column; overflow: hidden;
     background: var(--surface1); border: 1px solid var(--hairlineStrong);
-    border-radius: 16px; box-shadow: 0 30px 80px rgba(0,0,0,0.55);
+    border-radius: 16px; box-shadow: 0 30px 80px var(--shadow);
     animation: pop .16s cubic-bezier(.2,.7,.2,1) both;
   }
   @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.99); } to { opacity: 1; transform: none; } }

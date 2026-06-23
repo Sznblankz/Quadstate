@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { MIXED, TOKENS, signalColor } from "@logicsim/canvas";
+  import { MIXED, THEMES, signalColor } from "@logicsim/canvas";
   import CanvasHost from "./lib/CanvasHost.svelte";
   import Inspector from "./lib/Inspector.svelte";
   import TimingDiagram from "./lib/TimingDiagram.svelte";
@@ -20,12 +20,13 @@
   import { account, initAuth } from "./lib/account.svelte.js";
   import { parseShareSlug, fetchSharedProject } from "./lib/share.js";
   import { type TemplateId } from "./lib/templates.js";
-  import { settings, applyReducedMotion, reduceMotionActive, pullCloudSettings } from "./lib/settings.svelte.js";
+  import { settings, applyReducedMotion, applyTheme, reduceMotionActive, pullCloudSettings } from "./lib/settings.svelte.js";
 
   const ctrl = new AppController();
 
   // Settings overlay (shared across Home + editor).
   applyReducedMotion(); // mirror the saved choice onto <html> before first paint
+  applyTheme(); // mirror the saved light/dark choice onto <html>
   let settingsOpen = $state(false);
   let helpOpen = $state(false);
   let shareOpen = $state(false);
@@ -50,6 +51,7 @@
     ctrl.setSpaceMode(settings.spaceMode);
     ctrl.setDefaultBusWidth(settings.defaultBusWidth);
     ctrl.setStartLive(settings.startLive);
+    ctrl.setTheme(settings.theme);
   });
 
   // Effective reduced motion = in-app toggle OR the OS preference. Gates the
@@ -201,9 +203,11 @@
   async function renameProject(id: string, name: string) { await storeRename(id, name); refreshRecents(); }
   async function deleteProject(id: string) { await storeDelete(id); refreshRecents(); }
 
-  // The single token source (packages/canvas) mirrored onto CSS variables so
-  // chrome and canvas never drift. var(--surface1), var(--accent), etc.
-  const tokenStyle = Object.entries(TOKENS).map(([k, v]) => `--${k}: ${v}`).join(";");
+  // The active palette (packages/canvas) mirrored onto CSS variables so chrome
+  // and canvas never drift. Reactive to settings.theme → light/dark flips live.
+  const tokenStyle = $derived(
+    Object.entries(THEMES[settings.theme]).map(([k, v]) => `--${k}: ${v}`).join(";"),
+  );
 
   let ui = $state<UiState>({
     placePart: null, running: false,
@@ -642,7 +646,7 @@
     display: flex; align-items: center; gap: 10px; max-width: min(720px, 80%);
     background: var(--surface2); border: 1px solid var(--hairlineStrong);
     border-radius: 10px; padding: 7px 8px 7px 14px; font-size: 12px; color: var(--text2);
-    box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+    box-shadow: 0 6px 24px var(--shadow);
   }
   .hint b { color: var(--text1); font-weight: 600; }
 
@@ -673,7 +677,7 @@
     display: flex; align-items: center; gap: 12px;
     background: var(--surface2); border: 1px solid var(--hairlineStrong);
     border-radius: 10px; padding: 7px 8px 7px 14px; font-size: 13px; color: var(--text1);
-    box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+    box-shadow: 0 6px 24px var(--shadow);
   }
   .edit-def {
     background: var(--surface1); color: var(--text1); border: 1px solid var(--hairlineStrong);
@@ -692,7 +696,7 @@
     display: flex; align-items: center; gap: 12px; max-width: min(720px, 84%);
     background: var(--surface2); border: 1px solid var(--hairlineStrong);
     border-radius: 10px; padding: 7px 8px 7px 14px; font-size: 13px; color: var(--text2);
-    box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+    box-shadow: 0 6px 24px var(--shadow);
   }
   .shared-banner b { color: var(--text1); font-weight: 600; }
   .dup {
@@ -706,12 +710,12 @@
   /* Small centred modal (project migration prompt / shared-link error). */
   .modal-scrim {
     position: fixed; inset: 0; z-index: 130; display: grid; place-items: center; padding: 24px;
-    background: rgba(5,6,9,0.62); backdrop-filter: blur(2px);
+    background: var(--scrim); backdrop-filter: blur(2px);
   }
   .mini-modal {
     width: min(440px, 100%); background: var(--surface1);
     border: 1px solid var(--hairlineStrong); border-radius: 14px; padding: 22px 22px 18px;
-    box-shadow: 0 30px 80px rgba(0,0,0,0.55); color: var(--text1);
+    box-shadow: 0 30px 80px var(--shadow); color: var(--text1);
     animation: pop .16s cubic-bezier(.2,.7,.2,1) both;
   }
   @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.99); } to { opacity: 1; transform: none; } }

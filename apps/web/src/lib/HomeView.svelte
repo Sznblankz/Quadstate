@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { TOKENS } from "@logicsim/canvas";
+  import { THEMES } from "@logicsim/canvas";
   import BrandMark from "./BrandMark.svelte";
   import AccountMenu from "./AccountMenu.svelte";
   import { loadProject, type ProjectMeta } from "./projectStore.js";
   import { renderThumbnail } from "./thumbnail.js";
   import { TEMPLATES, templateProjectJson, type TemplateId } from "./templates.js";
-  import { reduceMotionActive } from "./settings.svelte.js";
+  import { reduceMotionActive, settings } from "./settings.svelte.js";
 
   let { recents, onNew, onOpen, onTemplate, onRename, onDelete, onOpenSettings, onPreload }: {
     recents: ProjectMeta[];
@@ -20,7 +20,9 @@
     onPreload: (id: string) => void;
   } = $props();
 
-  const tokenStyle = Object.entries(TOKENS).map(([k, v]) => `--${k}: ${v}`).join(";");
+  const tokenStyle = $derived(
+    Object.entries(THEMES[settings.theme]).map(([k, v]) => `--${k}: ${v}`).join(";"),
+  );
 
   let query = $state("");
   const filtered = $derived(
@@ -39,6 +41,12 @@
   const THUMB_W = 360, THUMB_H = 200;
   let thumbCache = $state<Record<string, string | null>>({});
   const thumbStarted = new Set<string>();
+  // Repaint thumbnails in the active palette when the theme flips.
+  $effect(() => {
+    settings.theme; // dependency
+    thumbCache = {};
+    thumbStarted.clear();
+  });
   function thumbFor(p: ProjectMeta): string | null {
     const key = `${p.id}:${p.savedAt}`;
     const cached = thumbCache[key];
@@ -315,7 +323,7 @@
   .tpl { flex: 0 0 auto; width: 168px; text-align: left; background: var(--surface1); border: 1px solid var(--hairline); border-radius: 12px; padding: 10px; cursor: pointer; color: var(--text1); font: inherit; display: flex; flex-direction: column; gap: 8px; transition: background .16s ease, border-color .16s ease, transform .16s ease; }
   .tpl:hover { background: var(--surface2); border-color: var(--hairlineStrong); transform: translateY(-1px); }
   .tpl:active { transform: translateY(0); }
-  .tpl-thumb { height: 62px; border-radius: 8px; overflow: hidden; background: var(--bg); background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 12px 12px; box-shadow: inset 0 0 0 1px var(--hairline); }
+  .tpl-thumb { height: 62px; border-radius: 8px; overflow: hidden; background: var(--bg); background-image: radial-gradient(var(--placeholderDot) 1px, transparent 1px); background-size: 12px 12px; box-shadow: inset 0 0 0 1px var(--hairline); }
   .tpl-thumb.has { background-image: none; }
   .tpl-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .tpl-name { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
@@ -346,17 +354,17 @@
   .card { position: relative; border-radius: 12px; }
   .card-body { background: var(--surface2); border: 1px solid var(--hairline); border-radius: 12px; padding: 12px; color: var(--text1); display: flex; flex-direction: column; gap: 8px; transition: background .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
   .card-open { position: absolute; inset: 0; z-index: 2; background: none; border: none; border-radius: 12px; cursor: pointer; padding: 0; }
-  .card:hover .card-body { background: var(--surface3); border-color: var(--hairlineStrong); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+  .card:hover .card-body { background: var(--surface3); border-color: var(--hairlineStrong); transform: translateY(-2px); box-shadow: 0 8px 24px var(--shadow); }
   /* Cursor spotlight — a subtle neutral highlight on the ACTION BUTTON under the
      pointer (New Circuit / Continue), never on the project thumbnails.
      --mx/--my set by the delegated glow handler. */
   .action::after, .resume-row::after {
     content: ""; position: absolute; inset: 0; pointer-events: none;
     opacity: 0; transition: opacity .2s ease;
-    background: radial-gradient(180px circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,0.05), transparent 60%);
+    background: radial-gradient(180px circle at var(--mx, 50%) var(--my, 50%), var(--placeholderDot), transparent 60%);
   }
   .action:hover::after, .resume-row:hover::after { opacity: 1; }
-  .card-thumb { height: 92px; border-radius: 8px; overflow: hidden; background: var(--bg); background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 14px 14px; box-shadow: inset 0 0 0 1px var(--hairline); }
+  .card-thumb { height: 92px; border-radius: 8px; overflow: hidden; background: var(--bg); background-image: radial-gradient(var(--placeholderDot) 1px, transparent 1px); background-size: 14px 14px; box-shadow: inset 0 0 0 1px var(--hairline); }
   .thumb.has { background-image: none; }
   .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .card-name { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -369,29 +377,29 @@
   .card-actions { position: absolute; right: 8px; bottom: 8px; z-index: 3; display: flex; gap: 5px; opacity: 0; transform: translateY(3px); transition: opacity .15s ease, transform .15s ease; pointer-events: none; }
   .card:hover .card-actions, .card:focus-within .card-actions { opacity: 1; transform: none; pointer-events: auto; }
   /* Small square icon buttons (pencil / trash) — quiet, hover-only. */
-  .card-act { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; background: rgba(13,15,20,0.82); backdrop-filter: blur(4px); color: var(--text2); border: 1px solid var(--hairline); border-radius: 7px; cursor: pointer; transition: background .14s ease, color .14s ease, border-color .14s ease; }
+  .card-act { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; background: var(--overlayPanel); backdrop-filter: blur(4px); color: var(--text2); border: 1px solid var(--hairline); border-radius: 7px; cursor: pointer; transition: background .14s ease, color .14s ease, border-color .14s ease; }
   .card-act svg { width: 15px; height: 15px; }
   .card-act:hover { background: var(--surface3); color: var(--text1); border-color: var(--hairlineStrong); }
-  .card-act.danger:hover { color: var(--sigX); border-color: rgba(232,85,78,0.5); }
+  .card-act.danger:hover { color: var(--accent); border-color: var(--accent); }
 
   /* Delete confirm — quiet inline panel over the card bottom. */
-  .confirm { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 3; display: flex; flex-direction: column; gap: 7px; background: rgba(13,15,20,0.92); backdrop-filter: blur(6px); border: 1px solid var(--hairlineStrong); border-radius: 9px; padding: 9px 10px; font-size: 12px; color: var(--text1); }
+  .confirm { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 3; display: flex; flex-direction: column; gap: 7px; background: var(--overlayPanel); backdrop-filter: blur(6px); border: 1px solid var(--hairlineStrong); border-radius: 9px; padding: 9px 10px; font-size: 12px; color: var(--text1); }
   .confirm-btns { display: flex; gap: 6px; justify-content: flex-end; }
   .q-btn { background: var(--surface2); color: var(--text2); border: 1px solid var(--hairline); border-radius: 7px; padding: 3px 11px; font: inherit; font-size: 12px; cursor: pointer; transition: background .14s ease, color .14s ease; }
   .q-btn:hover { background: var(--surface3); color: var(--text1); }
-  .q-btn.danger { color: #fff; background: var(--sigX); border-color: var(--sigX); }
-  .q-btn.danger:hover { background: #f0655e; }
+  .q-btn.danger { color: #fff; background: var(--accent); border-color: var(--accent); }
+  .q-btn.danger:hover { background: var(--accentHover); }
 
   .lib-empty { color: var(--text2); font-size: 14px; padding: 8px 2px; }
 
-  .fade { position: absolute; left: 1px; right: 1px; bottom: 1px; height: 56px; border-radius: 0 0 16px 16px; pointer-events: none; background: linear-gradient(to bottom, rgba(19,22,28,0), var(--surface1)); }
+  .fade { position: absolute; left: 1px; right: 1px; bottom: 1px; height: 56px; border-radius: 0 0 16px 16px; pointer-events: none; background: linear-gradient(to bottom, var(--fade), var(--surface1)); }
 
   /* Right-side large action cards. */
   .action { position: relative; overflow: hidden; text-align: left; border-radius: 16px; padding: 20px; cursor: pointer; font: inherit; color: var(--text1); border: 1px solid var(--hairline); background: var(--surface1); display: flex; flex-direction: column; gap: 6px; transition: background .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
   .action-title { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .action-sub { font-size: 13px; color: var(--text2); }
   .action.new { background: var(--accent); border-color: var(--accent); color: #fff; min-height: 150px; justify-content: center; }
-  .action.new:hover { background: var(--accentHover); transform: translateY(-2px); box-shadow: 0 10px 30px rgba(108,114,255,0.28); }
+  .action.new:hover { background: var(--accentHover); transform: translateY(-2px); box-shadow: 0 10px 30px rgba(189,75,59,0.30); }
   .action.new:active { transform: translateY(0); }
   .action.new .action-sub { color: rgba(255,255,255,0.82); }
   .action.new .plus { font-size: 30px; font-weight: 300; line-height: 1; margin-bottom: 4px; }
@@ -399,13 +407,13 @@
   .continue { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
   .continue .eyebrow { padding: 0 2px; }
   .action.resume { flex: 1 1 auto; min-height: 150px; }
-  .action.resume:hover { background: var(--surface2); border-color: var(--hairlineStrong); transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
-  .resume-thumb { flex: 1; min-height: 70px; margin: 8px 0; border-radius: 10px; overflow: hidden; background: var(--bg); background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 16px 16px; box-shadow: inset 0 0 0 1px var(--hairline); }
+  .action.resume:hover { background: var(--surface2); border-color: var(--hairlineStrong); transform: translateY(-2px); box-shadow: 0 10px 30px var(--shadow); }
+  .resume-thumb { flex: 1; min-height: 70px; margin: 8px 0; border-radius: 10px; overflow: hidden; background: var(--bg); background-image: radial-gradient(var(--placeholderDot) 1px, transparent 1px); background-size: 16px 16px; box-shadow: inset 0 0 0 1px var(--hairline); }
 
   .resume-row { position: relative; overflow: hidden; flex: 0 0 auto; display: flex; align-items: center; gap: 11px; text-align: left; background: var(--surface1); border: 1px solid var(--hairline); border-radius: 12px; padding: 9px; cursor: pointer; font: inherit; color: var(--text1); transition: background .16s ease, border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
-  .resume-row:hover { background: var(--surface2); border-color: var(--hairlineStrong); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,0.32); }
+  .resume-row:hover { background: var(--surface2); border-color: var(--hairlineStrong); transform: translateY(-1px); box-shadow: 0 6px 18px var(--shadow); }
   .resume-row:active { transform: translateY(0); }
-  .row-thumb { flex: 0 0 auto; width: 64px; height: 44px; border-radius: 8px; overflow: hidden; background: var(--bg); background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 12px 12px; box-shadow: inset 0 0 0 1px var(--hairline); }
+  .row-thumb { flex: 0 0 auto; width: 64px; height: 44px; border-radius: 8px; overflow: hidden; background: var(--bg); background-image: radial-gradient(var(--placeholderDot) 1px, transparent 1px); background-size: 12px 12px; box-shadow: inset 0 0 0 1px var(--hairline); }
   .row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .row-name { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row-meta { font-size: 11px; color: var(--text3); font-family: ui-monospace, monospace; }

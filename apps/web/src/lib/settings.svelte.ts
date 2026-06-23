@@ -6,6 +6,7 @@
  */
 import { supabase } from "./supabase.js";
 import { account } from "./account.svelte.js";
+import type { ThemeName } from "@logicsim/canvas";
 
 export const APP_NAME = "QuadState";
 export const APP_VERSION = "0.1.0";
@@ -31,6 +32,8 @@ export interface Settings {
   defaultSpeed: number;
   /** Begin simulating automatically when a circuit is opened. */
   startLive: boolean;
+  /** Light or dark appearance. */
+  theme: ThemeName;
 }
 
 const DEFAULTS: Settings = {
@@ -42,6 +45,7 @@ const DEFAULTS: Settings = {
   spaceMode: "playPan",
   defaultSpeed: 2000,
   startLive: false,
+  theme: "light",
 };
 
 const KEY = "quadstate:settings:v1";
@@ -66,6 +70,7 @@ function persist(): void {
 export function setSetting<K extends keyof Settings>(key: K, value: Settings[K]): void {
   settings[key] = value;
   if (key === "reducedMotion") applyReducedMotion();
+  if (key === "theme") applyTheme();
   persist();
   pushCloud();
 }
@@ -104,6 +109,7 @@ export async function pullCloudSettings(): Promise<void> {
   if (remote && typeof remote === "object") {
     Object.assign(settings, { ...DEFAULTS, ...remote });
     applyReducedMotion();
+    applyTheme();
     persist();
   } else {
     if (pushTimer) clearTimeout(pushTimer);
@@ -129,4 +135,12 @@ export function applyReducedMotion(): void {
   if (typeof document === "undefined") return;
   if (settings.reducedMotion) document.documentElement.dataset.reducedMotion = "1";
   else delete document.documentElement.dataset.reducedMotion;
+}
+
+/** Mirror the active theme onto the document root so the inline boot script's
+ *  `data-theme` flag and any `[data-theme]` CSS overrides stay in sync. The
+ *  chrome CSS vars + canvas palette are switched separately (App.svelte). */
+export function applyTheme(): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.dataset.theme = settings.theme;
 }

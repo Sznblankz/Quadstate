@@ -1,9 +1,9 @@
 import {
   CanvasStack, GestureRecognizer, ModelessTool, PlaceTool,
   SpatialGrid, Viewport, aggregateBus, busBin, busHex, componentBounds, hitTest, isIo, portPosition, stampOrigin, wireBounds, wireJunctions, wireSegments,
-  renderInk, renderOverlay, renderSchematic, renderSignals,
+  renderInk, renderOverlay, renderSchematic, renderSignals, setActiveTheme,
   type HitResult, type Intent, type OverlayState, type PointerKind, type RenderState,
-  type Tool, type ToolContext,
+  type ThemeName, type Tool, type ToolContext,
 } from "@logicsim/canvas";
 import { ContractTool } from "./proto/contract-tool.js";
 import { ProtoLogger } from "./proto/logger.js";
@@ -196,6 +196,12 @@ export class AppController {
 
   // ----------------------------------------------------- Settings: prefs
   setShowGrid(on: boolean): void { this.showGrid = on; this.dirtyStatic = true; }
+  /** Swap the canvas palette (light/dark) and force a repaint next frame. */
+  setTheme(name: ThemeName): void {
+    setActiveTheme(name);
+    this.dirtyStatic = true;
+    this.dirtySignals = true;
+  }
   setSnap(on: boolean): void { this.ctx.snap = on; }
   setWheelMode(mode: "zoom" | "pan"): void { this.wheelMode = mode; }
   setSpaceMode(mode: "playPan" | "transport"): void { this.spaceMode = mode; }

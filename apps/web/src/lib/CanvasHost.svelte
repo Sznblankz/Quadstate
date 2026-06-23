@@ -18,7 +18,7 @@
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background: #0B0D11;
+    background: var(--bg);
     cursor: crosshair;
   }
 </style>
