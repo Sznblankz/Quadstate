@@ -30,8 +30,9 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="scrim" onclick={onClose} role="presentation">
-  <div class="panel" role="dialog" aria-modal="true" aria-label="Shortcuts and gestures" onclick={(e) => e.stopPropagation()}>
+<div class="scrim" role="dialog" aria-modal="true" aria-label="Shortcuts and gestures">
+  <button class="backdrop" aria-label="Close help" onclick={onClose}></button>
+  <div class="panel">
     <header>
       <h2>Shortcuts &amp; gestures</h2>
       <button class="x" title="Close (Esc)" aria-label="Close" onclick={onClose}>×</button>
@@ -67,7 +68,9 @@
     animation: fade .12s ease both;
   }
   @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  .backdrop { position: absolute; inset: 0; background: none; border: none; cursor: default; }
   .panel {
+    position: relative;
     width: min(620px, 100%); max-height: 86vh; overflow-y: auto;
     background: var(--surface1); border: 1px solid var(--hairline);
     border-radius: 14px; box-shadow: 0 24px 60px var(--shadow);
